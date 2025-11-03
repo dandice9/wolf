@@ -2,11 +2,19 @@
 
 A modern, header-only C++23 web framework with high-performance trie-based routing and asynchronous HTTP/WebSocket support built on Boost.Beast.
 
+## 🆕 Recent Updates
+
+- **Simplified Parameter Access**: New `req.get("param")` method for easy parameter retrieval
+- **Automatic JSON Parsing**: Request bodies are automatically parsed to `boost::json::value`
+- **Unified Parameter API**: Single method to access both URI and query parameters
+- **Enhanced Request API**: Added `params()`, `query_params()`, and `get_json_body()` methods
+
 ## ✨ Features
 
 - 🚀 **Header-only** - Just include and use
 - 🔥 **Fast Routing** - Trie-based algorithm with O(k) complexity
 - 🎯 **Dynamic Parameters** - Extract route parameters (e.g., `/users/:id`)
+- 📦 **Auto JSON Parsing** - Request body parsed automatically to JSON
 - ⚡ **Async I/O** - Non-blocking with Boost.Asio
 - 🌐 **HTTP/1.1** - Full HTTP support via Boost.Beast
 - 🔌 **WebSocket** - Built-in WebSocket upgrade capability
@@ -59,8 +67,8 @@ int main() {
     
     // Route with parameters
     server->get("/users/:id", [](const http_request& req) {
-        auto params = req.params();
-        std::string user_id = params["id"];
+        // Access parameter directly with get()
+        std::string user_id = req.get("id");
         
         response_t response;
         response.result(http::status::ok);
@@ -104,7 +112,8 @@ int main() {
     
     // GET - Get item by ID
     server->get("/api/items/:id", [](const http_request& req) {
-        auto id = req.params()["id"];
+        // Access parameter with get()
+        auto id = req.get("id");
         
         json::object item = {
             {"id", std::stoi(id)},
@@ -120,13 +129,13 @@ int main() {
     
     // POST - Create item
     server->post("/api/items", [](const http_request& req) {
-        // Parse request body
-        auto body = json::parse(req.body());
+        // Parse JSON body automatically
+        auto json_body = req.get_json_body();
         
         json::object result = {
             {"id", 3},
             {"created", true},
-            {"data", body}
+            {"data", json_body}
         };
         
         response_t response;
@@ -138,13 +147,13 @@ int main() {
     
     // PUT - Update item
     server->put("/api/items/:id", [](const http_request& req) {
-        auto id = req.params()["id"];
-        auto body = json::parse(req.body());
+        auto id = req.get("id");
+        auto json_body = req.get_json_body();
         
         json::object result = {
             {"id", std::stoi(id)},
             {"updated", true},
-            {"data", body}
+            {"data", json_body}
         };
         
         response_t response;
@@ -156,13 +165,13 @@ int main() {
     
     // PATCH - Partial update
     server->patch("/api/items/:id", [](const http_request& req) {
-        auto id = req.params()["id"];
-        auto body = json::parse(req.body());
+        auto id = req.get("id");
+        auto json_body = req.get_json_body();
         
         json::object result = {
             {"id", std::stoi(id)},
             {"patched", true},
-            {"data", body}
+            {"data", json_body}
         };
         
         response_t response;
@@ -174,7 +183,7 @@ int main() {
     
     // DELETE - Delete item
     server->del("/api/items/:id", [](const http_request& req) {
-        auto id = req.params()["id"];
+        auto id = req.get("id");
         
         json::object result = {
             {"id", std::stoi(id)},
@@ -443,7 +452,7 @@ int main() {
     
     // User by ID
     server->get("/api/users/:id", [](const http_request& req) {
-        auto id = req.params()["id"];
+        auto id = req.get("id");
         
         json::object user = {
             {"id", std::stoi(id)},
@@ -516,15 +525,23 @@ server.start();
 ```cpp
 http_request& req;
 
-// Get route parameters
-auto params = req.params();  // boost::unordered_map<string, string>
+// Method 1: Get parameters directly (recommended)
+std::string id = req.get("id");           // Works for both URI and query params
+std::string search = req.get("q");        // Automatically checks both sources
+
+// Method 2: Get route parameters explicitly
+auto params = req.params();               // boost::unordered_map<string, string>
 std::string id = params["id"];
 
-// Get query parameters
-auto query = req.query();
+// Method 3: Get query parameters explicitly
+auto query = req.query_params();          // boost::unordered_map<string, string>
 std::string search = query["q"];
 
-// Get request body
+// Get JSON body (automatically parsed)
+auto json_data = req.get_json_body();     // boost::json::value
+// Returns nullptr if body is not valid JSON
+
+// Get raw request body
 std::string body = req.body();
 
 // Get headers
@@ -562,9 +579,64 @@ server->get("/about", handler);
 server->get("/users/:id", handler);
 server->get("/posts/:postId/comments/:commentId", handler);
 
-// Parameters are extracted automatically
-auto id = req.params()["id"];
-auto postId = req.params()["postId"];
+// Access parameters in handler
+server->get("/users/:id", [](const http_request& req) {
+    // Simple access (recommended)
+    auto id = req.get("id");
+    
+    // Or via params map
+    auto params = req.params();
+    auto id = params["id"];
+    
+    // Both work the same way
+});
+
+// Multiple parameters
+server->get("/posts/:postId/comments/:commentId", [](const http_request& req) {
+    auto post_id = req.get("postId");
+    auto comment_id = req.get("commentId");
+    // ...
+});
+```
+
+### JSON Body Handling
+
+```cpp
+// Automatic JSON parsing
+server->post("/api/users", [](const http_request& req) {
+    // JSON is automatically parsed from request body
+    auto json_data = req.get_json_body();  // boost::json::value
+    
+    // Check if parsing was successful
+    if (json_data.is_null()) {
+        response_t res;
+        res.result(http::status::bad_request);
+        res.body() = R"({"error": "Invalid JSON"})";
+        return res;
+    }
+    
+    // Access JSON data
+    auto obj = json_data.as_object();
+    std::string name = obj["name"].as_string().c_str();
+    std::string email = obj["email"].as_string().c_str();
+    
+    // Use the data...
+    response_t res;
+    res.result(http::status::created);
+    res.set(http::field::content_type, "application/json");
+    res.body() = json::serialize({
+        {"id", 123},
+        {"name", name},
+        {"email", email}
+    });
+    return res;
+});
+
+// Or use raw body if needed
+server->post("/api/data", [](const http_request& req) {
+    std::string raw_body = req.body();
+    // Process raw body...
+});
 ```
 
 ## 🧪 Running Tests

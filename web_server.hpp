@@ -31,6 +31,37 @@ namespace wolf {
                         query_params_[std::string(v.key)] = std::string(v.value);
                     }
                 }
+                boost::system::error_code ec;
+                json_body_ = json::parse(this->body(), ec);
+
+                if(ec) {
+                    // Handle parse error if necessary
+                    json_body_ = nullptr; // or some default value
+                }
+            }
+
+            auto get_json_body() const {
+                return json_body_;
+            }
+
+            auto params() const {
+                return uri_params_;
+            }
+
+            auto query_params() const {
+                return query_params_;
+            }
+
+            auto get(const std::string& key) const {
+                auto it = uri_params_.find(key);
+                if(it != uri_params_.end()) {
+                    return it->second;
+                }
+                it = query_params_.find(key);
+                if(it != query_params_.end()) {
+                    return it->second;
+                }
+                return std::string{};
             }
     };
 

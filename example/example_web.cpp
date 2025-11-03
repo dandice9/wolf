@@ -50,11 +50,11 @@ int main() {
     });
 
     // GET: Get user by ID
-    app->get("/api/users/:id", [](const wolf::http_request& /*req*/) {
+    app->get("/api/users/:id", [](const wolf::http_request& req) {
         wolf::response_t res;
         res.result(http::status::ok);
         res.set(http::field::content_type, "application/json");
-        res.body() = R"({"id": 1, "name": "Alice", "email": "alice@example.com"})";
+        res.body() = R"({"id": )" + req.get("id") + R"(, "name": "Alice", "email": "alice@example.com"})";
         return res;
     });
 
@@ -107,8 +107,10 @@ int main() {
         if (body.empty()) {
             body = R"({"email": "patched@example.com"})";
         }
-        
-        res.body() = R"({"id": 1, "patched": true, "data": )" + body + "}";
+
+        auto id = req.get("id");
+
+        res.body() = R"({"id": )" + id + R"(, "patched": true, "data": )" + body + "}";
         return res;
     });
 
