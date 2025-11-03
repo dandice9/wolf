@@ -16,6 +16,18 @@ namespace wolf {
     using request_t = beast::http::request<beast::http::string_body>;
     using response_t = beast::http::response<beast::http::string_body>;
 
+    response_t make_string_response(
+        const std::string& body,
+        beast::http::status status = beast::http::status::ok,
+        const std::string& content_type = "text/plain") 
+    {
+        response_t res{status, 11};
+        res.set(beast::http::field::content_type, content_type);
+        res.body() = body;
+        
+        return res;
+    }
+
     class http_request : public request_t {
         params_t query_params_;
         params_t uri_params_;
@@ -69,13 +81,28 @@ namespace wolf {
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
         beast::flat_buffer buffer_;
-        beast::websocket::stream<beast::tcp_stream> ws_;
+        beast::websocket::stream<tcp::socket> ws_;
+        std::function<std::string(const std::string&)> socket_handler_;
+        
         public:
-            websocket_session(tcp::socket socket)
-                : ws_(std::move(socket)) {}
+            // Constructor takes socket only
+            websocket_session(tcp::socket socket, 
+                              const std::function<std::string(const std::string&)>& handler = nullptr)
+                : ws_(std::move(socket)), socket_handler_(handler)
+            {
+                // Set WebSocket options
+                ws_.set_option(beast::websocket::stream_base::decorator(
+                    [](beast::websocket::response_type& res) {
+                        res.set(http::field::server, "WolfServer");
+                    }));
+            }
 
-            void start() {
+            // Start with already-read request
+            template<class Body, class Allocator>
+            void run(http::request<Body, http::basic_fields<Allocator>> req) {
+                // Accept the WebSocket upgrade using the parsed request
                 ws_.async_accept(
+                    req,
                     beast::bind_front_handler(
                         &websocket_session::on_accept,
                         shared_from_this()));
@@ -109,13 +136,29 @@ namespace wolf {
                 if(ec)
                     return;
 
-                // Echo the message back
-                ws_.text(ws_.got_text());
-                ws_.async_write(
-                    buffer_.data(),
-                    beast::bind_front_handler(
-                        &websocket_session::on_write,
-                        shared_from_this()));
+                const auto received_message = beast::buffers_to_string(buffer_.data());
+                // If a socket handler is set, process the message
+                if(socket_handler_) {
+                    const auto response_message = socket_handler_(received_message);
+                    ws_.text(ws_.got_text());
+                    ws_.async_write(
+                        net::buffer(response_message),
+                        beast::bind_front_handler(
+                            &websocket_session::on_write,
+                            shared_from_this()));
+                }
+                else {
+                    // close the connection if no handler is set
+                    ws_.async_close(beast::websocket::close_code::normal,
+                        beast::bind_front_handler(
+                            &websocket_session::on_close,
+                            shared_from_this()));
+                }
+            }
+
+            void on_close(beast::error_code ec) {
+                if(ec)
+                    return;
             }
 
             void do_read() {
@@ -156,8 +199,11 @@ namespace wolf {
             void handle_request() {
                 // check if it's a websocket upgrade
                 if (beast::websocket::is_upgrade(request_)) {
-                    // Create a websocket session and transfer control
-                    std::make_shared<websocket_session>(std::move(socket_))->start();
+                    // Create a websocket session and pass the request for upgrade
+                    auto ws_session = std::make_shared<websocket_session>(std::move(socket_), 
+                                                                          router_.get_socket_handler());
+                    ws_session->run(std::move(request_));
+
                     return;
                 }
 

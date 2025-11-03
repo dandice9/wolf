@@ -211,10 +211,20 @@ namespace wolf {
 
                 return {false, nullptr, {}};
             }
+
+            auto get_socket_handler() const {
+                return socket_handler_;
+            }
+
+            auto& set_socket_handler(const std::function<std::string(const std::string&)>& handler) {
+                socket_handler_ = handler;
+                return *this;
+            }
         
         private:
             boost::unordered_map<std::string, std::function<RT(PT)>> routes_;
             trie_router<std::function<RT(PT)>> trie_router_;
+            std::function<std::string(const std::string&)> socket_handler_;
     };
 
 }

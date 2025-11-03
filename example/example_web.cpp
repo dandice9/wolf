@@ -9,6 +9,11 @@ int main() {
     
     wolf::web_server app(8080);
 
+    app->set_socket_handler([](const std::string& msg) {
+        // Echo the received message back to the client
+        return "Echo: " + msg;
+    });
+
     // GET: Root endpoint
     app->get("/", [](const wolf::http_request& /*req*/) {
         wolf::response_t res;

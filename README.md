@@ -4,10 +4,12 @@ A modern, header-only C++23 web framework with high-performance trie-based routi
 
 ## 🆕 Recent Updates
 
+- **WebSocket Support**: Automatic WebSocket upgrade detection and handling (HTTP 101)
 - **Simplified Parameter Access**: New `req.get("param")` method for easy parameter retrieval
 - **Automatic JSON Parsing**: Request bodies are automatically parsed to `boost::json::value`
 - **Unified Parameter API**: Single method to access both URI and query parameters
 - **Enhanced Request API**: Added `params()`, `query_params()`, and `get_json_body()` methods
+- **Response Helper**: New `make_string_response()` for creating responses in one line
 
 ## ✨ Features
 
@@ -17,7 +19,7 @@ A modern, header-only C++23 web framework with high-performance trie-based routi
 - 📦 **Auto JSON Parsing** - Request body parsed automatically to JSON
 - ⚡ **Async I/O** - Non-blocking with Boost.Asio
 - 🌐 **HTTP/1.1** - Full HTTP support via Boost.Beast
-- 🔌 **WebSocket** - Built-in WebSocket upgrade capability
+- 🔌 **WebSocket** - Built-in WebSocket upgrade capability with auto-detection
 - 🧵 **Multi-threaded** - Auto-scaled thread pool
 - 🎨 **Modern C++23** - Type-safe and expressive
 - ✅ **Tested** - 152 unit test assertions (100% pass rate)
@@ -49,20 +51,20 @@ int main() {
     
     // Simple GET route
     server->get("/", [](const http_request& req) {
-        response_t response;
-        response.result(http::status::ok);
-        response.set(http::field::content_type, "text/html");
-        response.body() = "<h1>Hello, Wolf!</h1>";
-        return response;
+        return make_string_response(
+            "<h1>Hello, Wolf!</h1>",
+            http::status::ok,
+            "text/html"
+        );
     });
     
     // JSON API endpoint
     server->get("/api/hello", [](const http_request& req) {
-        response_t response;
-        response.result(http::status::ok);
-        response.set(http::field::content_type, "application/json");
-        response.body() = R"({"message": "Hello from Wolf!"})";
-        return response;
+        return make_string_response(
+            R"({"message": "Hello from Wolf!"})",
+            http::status::ok,
+            "application/json"
+        );
     });
     
     // Route with parameters
@@ -70,11 +72,11 @@ int main() {
         // Access parameter directly with get()
         std::string user_id = req.get("id");
         
-        response_t response;
-        response.result(http::status::ok);
-        response.set(http::field::content_type, "application/json");
-        response.body() = R"({"user_id": ")" + user_id + R"("})";
-        return response;
+        return make_string_response(
+            R"({"user_id": ")" + user_id + R"("})",
+            http::status::ok,
+            "application/json"
+        );
     });
     
     std::cout << "Server running on http://localhost:8080" << std::endl;
@@ -82,6 +84,28 @@ int main() {
     
     return 0;
 }
+```
+
+### Why Wolf is Simple
+
+Compare the traditional approach vs Wolf's helper functions:
+
+**Traditional (verbose):**
+```cpp
+server->get("/hello", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.set(http::field::content_type, "application/json");
+    res.body() = R"({"message": "Hello"})";
+    return res;
+});
+```
+
+**Wolf (concise):**
+```cpp
+server->get("/hello", [](const http_request& req) {
+    return make_string_response(R"({"message": "Hello"})", http::status::ok, "application/json");
+});
 ```
 
 ### REST API Example
@@ -203,6 +227,77 @@ int main() {
     return 0;
 }
 ```
+
+### WebSocket Example
+
+Wolf automatically handles WebSocket upgrades! No additional configuration needed.
+
+```cpp
+#include "wolf/web_server.hpp"
+#include <iostream>
+
+using namespace wolf;
+
+int main() {
+    web_server server(8080);
+    
+    // Regular HTTP endpoint
+    server->get("/", [](const http_request& req) {
+        return make_string_response(
+            R"(
+            <!DOCTYPE html>
+            <html>
+            <head><title>WebSocket Demo</title></head>
+            <body>
+                <h1>WebSocket Echo Server</h1>
+                <script>
+                    const ws = new WebSocket('ws://localhost:8080');
+                    ws.onopen = () => {
+                        console.log('Connected!');
+                        ws.send('Hello Wolf!');
+                    };
+                    ws.onmessage = (e) => {
+                        console.log('Received:', e.data);
+                    };
+                </script>
+            </body>
+            </html>
+            )",
+            http::status::ok,
+            "text/html"
+        );
+    });
+    
+    std::cout << "Server with WebSocket support on http://localhost:8080" << std::endl;
+    std::cout << "WebSocket automatically available at ws://localhost:8080" << std::endl;
+    server.start();
+    
+    return 0;
+}
+```
+
+**How it works:**
+1. Client sends HTTP upgrade request with WebSocket headers
+2. Wolf automatically detects the upgrade request
+3. Connection switches to WebSocket protocol (HTTP 101)
+4. Messages are echoed back to the client
+5. Supports both text and binary frames
+
+**Browser test:**
+```javascript
+const ws = new WebSocket("ws://localhost:8080");
+
+ws.onopen = () => {
+    console.log("Connected!");
+    ws.send("Hello from browser!");
+};
+
+ws.onmessage = (event) => {
+    console.log("Server says:", event.data);
+};
+```
+
+See [WEBSOCKET.md](WEBSOCKET.md) for detailed WebSocket documentation.
 
 ## 🛠️ Installation & Build
 
@@ -551,6 +646,28 @@ std::string content_type = req[http::field::content_type];
 ### HTTP Response
 
 ```cpp
+// Method 1: Using helper function (recommended for simple responses)
+return make_string_response(
+    "Hello, World!",                    // body
+    http::status::ok,                   // status (default: ok)
+    "text/plain"                        // content-type (default: text/plain)
+);
+
+// JSON response
+return make_string_response(
+    R"({"message": "Success"})",
+    http::status::ok,
+    "application/json"
+);
+
+// HTML response
+return make_string_response(
+    "<h1>Hello!</h1>",
+    http::status::ok,
+    "text/html"
+);
+
+// Method 2: Manual response building (for complex responses)
 response_t res;
 
 // Set status code
@@ -561,6 +678,7 @@ res.result(http::status::not_found);    // 404
 // Set headers
 res.set(http::field::content_type, "application/json");
 res.set(http::field::server, "MyApp");
+res.set(http::field::cache_control, "no-cache");
 
 // Set body
 res.body() = "Hello, World!";
@@ -639,6 +757,43 @@ server->post("/api/data", [](const http_request& req) {
 });
 ```
 
+### WebSocket
+
+```cpp
+// WebSocket support is automatic!
+// No special configuration needed.
+
+// When client sends WebSocket upgrade request:
+// GET / HTTP/1.1
+// Host: localhost:8080
+// Upgrade: websocket
+// Connection: Upgrade
+// Sec-WebSocket-Key: ...
+// Sec-WebSocket-Version: 13
+
+// Wolf automatically:
+// 1. Detects the upgrade request
+// 2. Performs WebSocket handshake (HTTP 101 Switching Protocols)
+// 3. Switches to WebSocket protocol
+// 4. Echoes messages back to client
+
+// JavaScript example:
+// const ws = new WebSocket('ws://localhost:8080');
+// ws.onopen = () => ws.send('Hello!');
+// ws.onmessage = (e) => console.log('Received:', e.data);
+
+// Python example (requires: pip install websockets):
+// import asyncio
+// import websockets
+// 
+// async def test():
+//     async with websockets.connect('ws://localhost:8080') as ws:
+//         await ws.send('Hello!')
+//         print(await ws.recv())
+// 
+// asyncio.run(test())
+```
+
 ## 🧪 Running Tests
 
 ```bash
@@ -712,6 +867,25 @@ See the `example/` directory for more complete examples:
 - `example_router.cpp` - Routing examples
 - `example_web.cpp` - Full REST API server
 - `test_client.cpp` - HTTP client for testing
+- `websocket_test.html` - WebSocket browser test
+- `test_websocket.py` - WebSocket Python test client
+
+### Quick WebSocket Test
+
+```bash
+# Start the server
+cd build/example
+./example_web
+
+# Test with JavaScript (open browser console on any page)
+const ws = new WebSocket("ws://localhost:8080");
+ws.onopen = () => ws.send("Hello!");
+ws.onmessage = (e) => console.log("Echo:", e.data);
+
+# Or test with Python
+pip install websockets
+python3 example/test_websocket.py
+```
 
 ## 🤝 Contributing
 
