@@ -41,6 +41,11 @@ int main() {
         return res;
     });
 
+    // ping endpoint
+    app->get("/ping", [](const wolf::http_request& /*req*/) {
+        return wolf::make_response("pong");
+    });
+
     // GET: List all users
     app->get("/api/users", [](const wolf::http_request& /*req*/) {
         wolf::response_t res;

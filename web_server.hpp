@@ -16,7 +16,7 @@ namespace wolf {
     using request_t = beast::http::request<beast::http::string_body>;
     using response_t = beast::http::response<beast::http::string_body>;
 
-    response_t make_string_response(
+    response_t make_response(
         const std::string& body,
         beast::http::status status = beast::http::status::ok,
         const std::string& content_type = "text/plain") 

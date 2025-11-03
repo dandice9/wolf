@@ -9,7 +9,7 @@ A modern, header-only C++23 web framework with high-performance trie-based routi
 - **Automatic JSON Parsing**: Request bodies are automatically parsed to `boost::json::value`
 - **Unified Parameter API**: Single method to access both URI and query parameters
 - **Enhanced Request API**: Added `params()`, `query_params()`, and `get_json_body()` methods
-- **Response Helper**: New `make_string_response()` for creating responses in one line
+- **Response Helper**: New `make_response()` for creating responses in one line
 
 ## ✨ Features
 
@@ -48,10 +48,15 @@ using namespace wolf;
 int main() {
     // Create server on port 8080
     web_server server(8080);
-    
+
     // Simple GET route
+    server->get("/ping", [](const wolf::http_request& /*req*/) {
+        return make_response("pong");
+    });
+    
+    // Simple GET route with status and content type 
     server->get("/", [](const http_request& req) {
-        return make_string_response(
+        return make_response(
             "<h1>Hello, Wolf!</h1>",
             http::status::ok,
             "text/html"
@@ -60,7 +65,7 @@ int main() {
     
     // JSON API endpoint
     server->get("/api/hello", [](const http_request& req) {
-        return make_string_response(
+        return make_response(
             R"({"message": "Hello from Wolf!"})",
             http::status::ok,
             "application/json"
@@ -72,7 +77,7 @@ int main() {
         // Access parameter directly with get()
         std::string user_id = req.get("id");
         
-        return make_string_response(
+        return make_response(
             R"({"user_id": ")" + user_id + R"("})",
             http::status::ok,
             "application/json"
@@ -104,7 +109,7 @@ server->get("/hello", [](const http_request& req) {
 **Wolf (concise):**
 ```cpp
 server->get("/hello", [](const http_request& req) {
-    return make_string_response(R"({"message": "Hello"})", http::status::ok, "application/json");
+    return make_response(R"({"message": "Hello"})", http::status::ok, "application/json");
 });
 ```
 
@@ -243,7 +248,7 @@ int main() {
     
     // Regular HTTP endpoint
     server->get("/", [](const http_request& req) {
-        return make_string_response(
+        return make_response(
             R"(
             <!DOCTYPE html>
             <html>
@@ -647,21 +652,21 @@ std::string content_type = req[http::field::content_type];
 
 ```cpp
 // Method 1: Using helper function (recommended for simple responses)
-return make_string_response(
+return make_response(
     "Hello, World!",                    // body
     http::status::ok,                   // status (default: ok)
     "text/plain"                        // content-type (default: text/plain)
 );
 
 // JSON response
-return make_string_response(
+return make_response(
     R"({"message": "Success"})",
     http::status::ok,
     "application/json"
 );
 
 // HTML response
-return make_string_response(
+return make_response(
     "<h1>Hello!</h1>",
     http::status::ok,
     "text/html"
