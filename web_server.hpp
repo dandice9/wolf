@@ -28,6 +28,33 @@ namespace wolf {
         return res;
     }
 
+    response_t set_cookie(
+        response_t& res,
+        const std::string& key,
+        const std::string& value,
+        const std::string& path = "/",
+        const std::string& domain = "",
+        int max_age = -1,
+        bool http_only = true,
+        bool secure = false) 
+    {
+        std::string cookie = key + "=" + value + "; Path=" + path;
+        if (!domain.empty()) {
+            cookie += "; Domain=" + domain;
+        }
+        if (max_age >= 0) {
+            cookie += "; Max-Age=" + std::to_string(max_age);
+        }
+        if (http_only) {
+            cookie += "; HttpOnly";
+        }
+        if (secure) {
+            cookie += "; Secure";
+        }
+        res.set(beast::http::field::set_cookie, cookie);
+        return res;
+    }
+
     class http_request : public request_t {
         params_t query_params_;
         params_t uri_params_;
@@ -62,6 +89,37 @@ namespace wolf {
 
             auto query_params() const {
                 return query_params_;
+            }
+
+            auto cookies() const {
+                auto it = this->find(http::field::cookie);
+                params_t cookies;
+                if(it != this->end()) {
+                    std::string cookie_str = it->value();
+                    std::vector<std::string> cookie_pairs;
+                    size_t start = 0;
+                    size_t end = 0;
+                    while((end = cookie_str.find(';', start)) != std::string::npos) {
+                        cookie_pairs.push_back(cookie_str.substr(start, end - start));
+                        start = end + 1;
+                    }
+                    cookie_pairs.push_back(cookie_str.substr(start));
+
+                    for(const auto& pair : cookie_pairs) {
+                        auto eq_pos = pair.find('=');
+                        if(eq_pos != std::string::npos) {
+                            std::string key = pair.substr(0, eq_pos);
+                            std::string value = pair.substr(eq_pos + 1);
+                            // Trim whitespace
+                            key.erase(0, key.find_first_not_of(" \t"));
+                            key.erase(key.find_last_not_of(" \t") + 1);
+                            value.erase(0, value.find_first_not_of(" \t"));
+                            value.erase(value.find_last_not_of(" \t") + 1);
+                            cookies[key] = value;
+                        }
+                    }
+                }
+                return cookies;
             }
 
             auto get(const std::string& key) const {
@@ -218,7 +276,7 @@ namespace wolf {
                     case http::verb::get: method = GET; break;
                     case http::verb::post: method = POST; break;
                     case http::verb::put: method = PUT; break;
-                    case http::verb::delete_: method = DELETE; break;
+                    case http::verb::delete_: method = DEL; break;
                     case http::verb::patch: method = PATCH; break;
                     case http::verb::options: method = OPTIONS; break;
                     case http::verb::head: method = HEAD; break;

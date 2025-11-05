@@ -41,9 +41,49 @@ int main() {
         return res;
     });
 
-    // ping endpoint
+    // ping endpoint - simple string return
     app->get("/ping", [](const wolf::http_request& /*req*/) {
-        return wolf::make_response("pong");
+        return "pong";
+    });
+
+    // Cookie examples
+    app->get("/set-cookie", [](const wolf::http_request& /*req*/) {
+        wolf::response_t res;
+        res.result(http::status::ok);
+        res.set(http::field::content_type, "application/json");
+        res.body() = R"({"message": "Cookie set successfully"})";
+        
+        // Set a cookie with 1 hour expiration
+        wolf::set_cookie(res, "session_id", "demo_session_12345", "/", "", 3600);
+        
+        return res;
+    });
+
+    app->get("/get-cookie", [](const wolf::http_request& req) {
+        auto cookies = req.cookies();
+        
+        wolf::response_t res;
+        res.result(http::status::ok);
+        res.set(http::field::content_type, "application/json");
+        
+        if (cookies.find("session_id") != cookies.end()) {
+            res.body() = R"({"session_id": ")" + cookies.at("session_id") + R"("})";
+        } else {
+            res.body() = R"({"error": "No session cookie found"})";
+        }
+        
+        return res;
+    });
+
+    app->get("/hello", [](const wolf::http_request& req) {
+        auto cookies = req.cookies();
+        
+        std::string greeting = "Hello, Guest!";
+        if (cookies.find("username") != cookies.end()) {
+            greeting = "Hello, " + cookies.at("username") + "!";
+        }
+
+        return greeting;
     });
 
     // GET: List all users

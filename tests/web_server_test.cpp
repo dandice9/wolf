@@ -52,6 +52,68 @@ TEST_CASE("HTTP Request - Parameter handling", "[http_request]") {
         REQUIRE(req.method() == http::verb::post);
         REQUIRE(req.target() == "/api/data");
     }
+
+    SECTION("Cookie parsing - single cookie") {
+        http::request<http::string_body> base_req;
+        base_req.method(http::verb::get);
+        base_req.target("/");
+        base_req.set(http::field::cookie, "session_id=abc123");
+        
+        params_t uri_params;
+        auto query_result = boost::urls::parse_query("");
+        http_request req(base_req, uri_params, query_result);
+        
+        auto cookies = req.cookies();
+        REQUIRE(cookies.size() == 1);
+        REQUIRE(cookies.at("session_id") == "abc123");
+    }
+
+    SECTION("Cookie parsing - multiple cookies") {
+        http::request<http::string_body> base_req;
+        base_req.method(http::verb::get);
+        base_req.target("/");
+        base_req.set(http::field::cookie, "session_id=abc123; user_id=456; theme=dark");
+        
+        params_t uri_params;
+        auto query_result = boost::urls::parse_query("");
+        http_request req(base_req, uri_params, query_result);
+        
+        auto cookies = req.cookies();
+        REQUIRE(cookies.size() == 3);
+        REQUIRE(cookies.at("session_id") == "abc123");
+        REQUIRE(cookies.at("user_id") == "456");
+        REQUIRE(cookies.at("theme") == "dark");
+    }
+
+    SECTION("Cookie parsing - no cookies") {
+        http::request<http::string_body> base_req;
+        base_req.method(http::verb::get);
+        base_req.target("/");
+        
+        params_t uri_params;
+        auto query_result = boost::urls::parse_query("");
+        http_request req(base_req, uri_params, query_result);
+        
+        auto cookies = req.cookies();
+        REQUIRE(cookies.empty());
+    }
+
+    SECTION("Cookie parsing - with whitespace") {
+        http::request<http::string_body> base_req;
+        base_req.method(http::verb::get);
+        base_req.target("/");
+        base_req.set(http::field::cookie, "session_id=abc123;  user_id = 456 ; theme=dark");
+        
+        params_t uri_params;
+        auto query_result = boost::urls::parse_query("");
+        http_request req(base_req, uri_params, query_result);
+        
+        auto cookies = req.cookies();
+        REQUIRE(cookies.size() == 3);
+        REQUIRE(cookies.at("session_id") == "abc123");
+        REQUIRE(cookies.at("user_id") == "456");
+        REQUIRE(cookies.at("theme") == "dark");
+    }
 }
 
 TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
@@ -274,6 +336,66 @@ TEST_CASE("Response building", "[response]") {
 
         REQUIRE(res.result() == http::status::moved_permanently);
         REQUIRE(res[http::field::location] == "/new-location");
+    }
+
+    SECTION("Set cookie - basic") {
+        response_t res;
+        res.result(http::status::ok);
+        res.body() = "Cookie set";
+        
+        wolf::set_cookie(res, "session_id", "abc123");
+        
+        REQUIRE(res[http::field::set_cookie] == "session_id=abc123; Path=/; HttpOnly");
+    }
+
+    SECTION("Set cookie - with path and domain") {
+        response_t res;
+        res.result(http::status::ok);
+        
+        wolf::set_cookie(res, "user_token", "xyz789", "/api", "example.com");
+        
+        std::string cookie = res[http::field::set_cookie];
+        REQUIRE(cookie.find("user_token=xyz789") != std::string::npos);
+        REQUIRE(cookie.find("Path=/api") != std::string::npos);
+        REQUIRE(cookie.find("Domain=example.com") != std::string::npos);
+    }
+
+    SECTION("Set cookie - with max age") {
+        response_t res;
+        res.result(http::status::ok);
+        
+        wolf::set_cookie(res, "remember_me", "true", "/", "", 3600);
+        
+        std::string cookie = res[http::field::set_cookie];
+        REQUIRE(cookie.find("remember_me=true") != std::string::npos);
+        REQUIRE(cookie.find("Max-Age=3600") != std::string::npos);
+    }
+
+    SECTION("Set cookie - secure and http only") {
+        response_t res;
+        res.result(http::status::ok);
+        
+        wolf::set_cookie(res, "secure_token", "secret", "/", "", -1, true, true);
+        
+        std::string cookie = res[http::field::set_cookie];
+        REQUIRE(cookie.find("secure_token=secret") != std::string::npos);
+        REQUIRE(cookie.find("HttpOnly") != std::string::npos);
+        REQUIRE(cookie.find("Secure") != std::string::npos);
+    }
+
+    SECTION("Set cookie - all options") {
+        response_t res;
+        res.result(http::status::ok);
+        
+        wolf::set_cookie(res, "full_cookie", "value123", "/app", "example.com", 7200, true, true);
+        
+        std::string cookie = res[http::field::set_cookie];
+        REQUIRE(cookie.find("full_cookie=value123") != std::string::npos);
+        REQUIRE(cookie.find("Path=/app") != std::string::npos);
+        REQUIRE(cookie.find("Domain=example.com") != std::string::npos);
+        REQUIRE(cookie.find("Max-Age=7200") != std::string::npos);
+        REQUIRE(cookie.find("HttpOnly") != std::string::npos);
+        REQUIRE(cookie.find("Secure") != std::string::npos);
     }
 }
 

@@ -4,6 +4,8 @@ A modern, header-only C++23 web framework with high-performance trie-based routi
 
 ## 🆕 Recent Updates
 
+- **Cookie Support**: Get and set cookies with `req.cookies()` and `set_cookie()` helper
+- **Simplified String Returns**: Handlers can now return plain strings directly (e.g., `return "pong";`)
 - **WebSocket Support**: Automatic WebSocket upgrade detection and handling (HTTP 101)
 - **Simplified Parameter Access**: New `req.get("param")` method for easy parameter retrieval
 - **Automatic JSON Parsing**: Request bodies are automatically parsed to `boost::json::value`
@@ -49,9 +51,9 @@ int main() {
     // Create server on port 8080
     web_server server(8080);
 
-    // Simple GET route
+    // Simple GET route - just return a string!
     server->get("/ping", [](const wolf::http_request& /*req*/) {
-        return make_response("pong");
+        return "pong";
     });
     
     // Simple GET route with status and content type 
@@ -84,6 +86,38 @@ int main() {
         );
     });
     
+    // Cookie example - set cookie
+    server->get("/login", [](const http_request& req) {
+        response_t res;
+        res.result(http::status::ok);
+        res.body() = R"({"status": "logged in"})";
+        res.set(http::field::content_type, "application/json");
+        
+        // Set a session cookie (HttpOnly, expires in 1 hour)
+        set_cookie(res, "session_id", "abc123xyz", "/", "", 3600);
+        
+        return res;
+    });
+    
+    // Cookie example - read cookie
+    server->get("/profile", [](const http_request& req) {
+        auto cookies = req.cookies();
+        
+        if (cookies.find("session_id") != cookies.end()) {
+            return make_response(
+                R"({"message": "Welcome back!", "session": ")" + cookies.at("session_id") + R"("})",
+                http::status::ok,
+                "application/json"
+            );
+        }
+        
+        return make_response(
+            R"({"error": "Not logged in"})",
+            http::status::unauthorized,
+            "application/json"
+        );
+    });
+    
     std::cout << "Server running on http://localhost:8080" << std::endl;
     server.start();  // Blocking call
     
@@ -93,23 +127,30 @@ int main() {
 
 ### Why Wolf is Simple
 
-Compare the traditional approach vs Wolf's helper functions:
+Compare the traditional approach vs Wolf's simplified handlers:
 
 **Traditional (verbose):**
 ```cpp
 server->get("/hello", [](const http_request& req) {
     response_t res;
     res.result(http::status::ok);
-    res.set(http::field::content_type, "application/json");
-    res.body() = R"({"message": "Hello"})";
+    res.set(http::field::content_type, "text/plain");
+    res.body() = "Hello, World!";
     return res;
 });
 ```
 
-**Wolf (concise):**
+**Wolf - Option 1 (simplest for plain text):**
 ```cpp
 server->get("/hello", [](const http_request& req) {
-    return make_response(R"({"message": "Hello"})", http::status::ok, "application/json");
+    return "Hello, World!";  // Automatically creates response with status 200
+});
+```
+
+**Wolf - Option 2 (using helper for custom status/content-type):**
+```cpp
+server->get("/hello", [](const http_request& req) {
+    return make_response("Hello, World!", http::status::ok, "text/plain");
 });
 ```
 
@@ -599,6 +640,10 @@ cmake --build . --config Release
 curl http://localhost:8080/
 curl http://localhost:8080/api/users
 curl http://localhost:8080/api/users/1
+
+# Test cookies
+curl -c cookies.txt http://localhost:8080/login
+curl -b cookies.txt http://localhost:8080/profile
 ```
 
 ## 📚 API Reference
@@ -609,15 +654,32 @@ curl http://localhost:8080/api/users/1
 // Create server
 web_server server(port);
 
-// Define routes
-server->get(path, handler);
+// Define routes - handlers can return string or response_t
+server->get(path, handler);      // handler: [](const http_request&) -> string | response_t
 server->post(path, handler);
 server->put(path, handler);
 server->patch(path, handler);
-server->del(path, handler);  // DELETE
+server->del(path, handler);      // DELETE
 
 // Start server (blocking)
 server.start();
+
+// Examples of different handler return types:
+server->get("/simple", [](const http_request& req) {
+    return "Just a string!";  // Returns 200 OK, text/plain
+});
+
+server->get("/custom", [](const http_request& req) {
+    return make_response("Custom", http::status::created, "text/html");
+});
+
+server->get("/full", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.set(http::field::content_type, "application/json");
+    res.body() = R"({"status": "ok"})";
+    return res;  // Full control
+});
 ```
 
 ### HTTP Request
@@ -637,6 +699,11 @@ std::string id = params["id"];
 auto query = req.query_params();          // boost::unordered_map<string, string>
 std::string search = query["q"];
 
+// Get cookies
+auto cookies = req.cookies();             // boost::unordered_map<string, string>
+std::string session_id = cookies["session_id"];
+std::string user_token = cookies["user_token"];
+
 // Get JSON body (automatically parsed)
 auto json_data = req.get_json_body();     // boost::json::value
 // Returns nullptr if body is not valid JSON
@@ -651,7 +718,12 @@ std::string content_type = req[http::field::content_type];
 ### HTTP Response
 
 ```cpp
-// Method 1: Using helper function (recommended for simple responses)
+// Method 1: Return a string directly (simplest, auto status 200, text/plain)
+return "Hello, World!";
+return "pong";
+return "Success";
+
+// Method 2: Using helper function (for custom status/content-type)
 return make_response(
     "Hello, World!",                    // body
     http::status::ok,                   // status (default: ok)
@@ -672,7 +744,7 @@ return make_response(
     "text/html"
 );
 
-// Method 2: Manual response building (for complex responses)
+// Method 3: Manual response building (for complex responses)
 response_t res;
 
 // Set status code
@@ -690,6 +762,79 @@ res.body() = "Hello, World!";
 res.body() = json::serialize(data);
 
 return res;
+```
+
+### Cookie Handling
+
+```cpp
+// Reading cookies from request
+server->get("/profile", [](const http_request& req) {
+    auto cookies = req.cookies();
+    
+    if (cookies.find("session_id") != cookies.end()) {
+        std::string session_id = cookies["session_id"];
+        return make_response("Welcome back! Session: " + session_id);
+    }
+    
+    return make_response("No session found", http::status::unauthorized);
+});
+
+// Setting cookies in response
+server->get("/login", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.body() = "Logged in successfully";
+    
+    // Basic cookie (path=/, HttpOnly)
+    set_cookie(res, "session_id", "abc123");
+    
+    return res;
+});
+
+// Setting cookie with all options
+server->get("/login-secure", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.body() = "Logged in";
+    
+    // set_cookie(response, key, value, path, domain, max_age, http_only, secure)
+    set_cookie(res, 
+        "auth_token",           // Cookie name
+        "xyz789",               // Cookie value
+        "/",                    // Path (default: "/")
+        "example.com",          // Domain (default: "")
+        3600,                   // Max-Age in seconds (default: -1, no expiry)
+        true,                   // HttpOnly (default: true)
+        true                    // Secure (default: false)
+    );
+    
+    return res;
+});
+
+// Setting multiple cookies
+server->get("/set-preferences", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.body() = "Preferences saved";
+    
+    // Note: Each set_cookie call overwrites the Set-Cookie header
+    // For multiple cookies, set them sequentially in the same response
+    set_cookie(res, "theme", "dark", "/", "", 86400);      // 24 hours
+    set_cookie(res, "language", "en", "/", "", 86400);     // 24 hours
+    
+    return res;
+});
+
+// Deleting a cookie (set Max-Age to 0)
+server->get("/logout", [](const http_request& req) {
+    response_t res;
+    res.result(http::status::ok);
+    res.body() = "Logged out";
+    
+    set_cookie(res, "session_id", "", "/", "", 0);  // Max-Age=0 deletes cookie
+    
+    return res;
+});
 ```
 
 ### Route Patterns
@@ -870,10 +1015,28 @@ taskkill /PID <PID> /F
 
 See the `example/` directory for more complete examples:
 - `example_router.cpp` - Routing examples
-- `example_web.cpp` - Full REST API server
+- `example_web.cpp` - Full REST API server with cookie examples
 - `test_client.cpp` - HTTP client for testing
 - `websocket_test.html` - WebSocket browser test
 - `test_websocket.py` - WebSocket Python test client
+
+### Quick Cookie Test
+
+```bash
+# Start the server
+cd build/example
+./example_web
+
+# Set a cookie
+curl -v http://localhost:8080/set-cookie
+
+# Get cookie value (pass the cookie back)
+curl -b "session_id=demo_session_12345" http://localhost:8080/get-cookie
+
+# Using curl's cookie jar
+curl -c cookies.txt http://localhost:8080/set-cookie
+curl -b cookies.txt http://localhost:8080/get-cookie
+```
 
 ### Quick WebSocket Test
 

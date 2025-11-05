@@ -13,7 +13,7 @@ namespace wolf {
         GET,
         POST,
         PUT,
-        DELETE,
+        DEL,
         PATCH,
         OPTIONS,
         HEAD,
@@ -26,7 +26,7 @@ namespace wolf {
             case GET: return "GET";
             case POST: return "POST";
             case PUT: return "PUT";
-            case DELETE: return "DELETE";
+            case DEL: return "DELETE";
             case PATCH: return "PATCH";
             case OPTIONS: return "OPTIONS";
             case HEAD: return "HEAD";
@@ -150,7 +150,23 @@ namespace wolf {
                 return *this;
             }
 
+            // Overload for string-returning handlers
+            http_router& add(http_method method, const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(method, route, [handler](PT req) -> RT {
+                    RT res;
+                    res.result(boost::beast::http::status::ok);
+                    res.set(boost::beast::http::field::content_type, "text/plain");
+                    res.body() = handler(req);
+                    res.prepare_payload();
+                    return res;
+                });
+            }
+
             http_router& get(const std::string& route, const std::function<RT(PT)>& handler) {
+                return add(GET, route, handler);
+            }
+
+            http_router& get(const std::string& route, const std::function<std::string(PT)>& handler) {
                 return add(GET, route, handler);
             }
 
@@ -158,19 +174,39 @@ namespace wolf {
                 return add(POST, route, handler);
             }
 
+            http_router& post(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(POST, route, handler);
+            }
+
             http_router& put(const std::string& route, const std::function<RT(PT)>& handler) {
                 return add(PUT, route, handler);
             }
 
+            http_router& put(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(PUT, route, handler);
+            }
+
             http_router& del(const std::string& route, const std::function<RT(PT)>& handler) {
-                return add(DELETE, route, handler);
+                return add(DEL, route, handler);
+            }
+
+            http_router& del(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(DEL, route, handler);
             }
 
             http_router& patch(const std::string& route, const std::function<RT(PT)>& handler) {
                 return add(PATCH, route, handler);
             }
 
+            http_router& patch(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(PATCH, route, handler);
+            }
+
             http_router& options(const std::string& route, const std::function<RT(PT)>& handler) {
+                return add(OPTIONS, route, handler);
+            }
+
+            http_router& options(const std::string& route, const std::function<std::string(PT)>& handler) {
                 return add(OPTIONS, route, handler);
             }
             
@@ -178,11 +214,23 @@ namespace wolf {
                 return add(HEAD, route, handler);
             }
 
+            http_router& head(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(HEAD, route, handler);
+            }
+
             http_router& connect(const std::string& route, const std::function<RT(PT)>& handler) {
                 return add(CONNECT, route, handler);
             }
 
+            http_router& connect(const std::string& route, const std::function<std::string(PT)>& handler) {
+                return add(CONNECT, route, handler);
+            }
+
             http_router& trace(const std::string& route, const std::function<RT(PT)>& handler) {
+                return add(TRACE, route, handler);
+            }
+
+            http_router& trace(const std::string& route, const std::function<std::string(PT)>& handler) {
                 return add(TRACE, route, handler);
             }
 
