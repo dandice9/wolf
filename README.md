@@ -342,6 +342,73 @@ clang++ -std=c++23 -I/usr/local/include -Iwolf main.cpp -o app -lboost_json -lpt
 
 - **C++23** compiler (Clang 16+, GCC 12+, MSVC 2022+)
 - **Boost 1.89+** (included as boost.zip)
+- **Catch2 v3** (optional, for running tests)
+
+## 🧪 Running Tests (Windows)
+
+Wolf includes comprehensive unit tests using Catch2.
+
+### Setup
+
+1. **Install or build Catch2 v3** and set up the directory structure:
+
+```
+c:\libraries\Catch2\
+├── include\
+│   └── catch2\
+│       ├── catch_test_macros.hpp
+│       └── ...
+└── lib\
+    └── Catch2Maind.lib (or Catch2Main.lib)
+```
+
+2. **Set environment variables:**
+
+```powershell
+$env:BOOST_DIR = "c:\source\wolf\boost"      # Or your Boost location
+$env:CATCH2_DIR = "c:\libraries\Catch2"      # Your Catch2 location
+
+# Make permanent
+[Environment]::SetEnvironmentVariable('CATCH2_DIR', 'c:\libraries\Catch2', 'User')
+```
+
+3. **Build and run tests:**
+
+```powershell
+cd tests
+.\build.ps1
+
+# Run all tests
+cd build
+.\router_test.exe
+.\web_server_test.exe
+
+# Run specific test
+.\router_test.exe "[http_router]"
+.\web_server_test.exe "[http_request]"
+
+# List available tests
+.\router_test.exe --list-tests
+```
+
+### Test Coverage
+
+- **Router Tests** (`router_test.exe`)
+  - HTTP method routing (GET, POST, PUT, DELETE, etc.)
+  - Trie-based parameterized routes (`/users/:id`)
+  - Nested parameters (`/api/:version/users/:userId`)
+  - Static and dynamic route coexistence
+  - Edge cases (trailing slashes, empty routes)
+
+- **Web Server Tests** (`web_server_test.exe`)
+  - HTTP request/response handling
+  - Cookie parsing (single, multiple, with whitespace)
+  - Cookie setting (with path, domain, max-age, secure, httponly)
+  - Query parameter extraction
+  - Status code validation
+  - RESTful API patterns
+
+See `tests/README.md` for detailed test documentation.
 
 ## 📖 More Examples
 

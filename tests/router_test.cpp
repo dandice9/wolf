@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <functional>
 #include <string>
-#include "../http_router.hpp"
+#include "../src/http_router.hpp"
 
 using namespace wolf;
 
@@ -103,7 +103,7 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         auto [is_trie3, handler3, params3] = router.resolve(PUT, "/put");
         REQUIRE(handler3 != nullptr);
         
-        auto [is_trie4, handler4, params4] = router.resolve(DELETE, "/delete");
+        auto [is_trie4, handler4, params4] = router.resolve(DEL, "/delete");
         REQUIRE(handler4 != nullptr);
         
         auto [is_trie5, handler5, params5] = router.resolve(PATCH, "/patch");
@@ -240,7 +240,7 @@ TEST_CASE("HTTP Methods - Enum and string conversion", "[http_methods]") {
         REQUIRE(method_to_string(GET) == "GET");
         REQUIRE(method_to_string(POST) == "POST");
         REQUIRE(method_to_string(PUT) == "PUT");
-        REQUIRE(method_to_string(DELETE) == "DELETE");
+        REQUIRE(method_to_string(DEL) == "DELETE");
         REQUIRE(method_to_string(PATCH) == "PATCH");
         REQUIRE(method_to_string(OPTIONS) == "OPTIONS");
         REQUIRE(method_to_string(HEAD) == "HEAD");

@@ -3,7 +3,7 @@
 #include <boost/beast.hpp>
 #include <thread>
 #include <chrono>
-#include "../web_server.hpp"
+#include "../src/web_server.hpp"
 
 using namespace wolf;
 namespace http = boost::beast::http;
@@ -299,7 +299,7 @@ TEST_CASE("Wolf Router - Complex routing scenarios", "[wolf_router]") {
         REQUIRE(handler_update != nullptr);
         REQUIRE(params_update.at("id") == "1");
 
-        auto [is_trie_delete, handler_delete, params_delete] = router.resolve(DELETE, "/api/users/1");
+        auto [is_trie_delete, handler_delete, params_delete] = router.resolve(DEL, "/api/users/1");
         REQUIRE(handler_delete != nullptr);
         REQUIRE(params_delete.at("id") == "1");
     }

@@ -2,6 +2,91 @@
 
 This directory contains comprehensive test suites for the Wolf web server framework using Catch2.
 
+## Quick Start (Windows)
+
+### Prerequisites
+
+1. **Clang compiler** (LLVM 16+)
+2. **Boost libraries** (1.89+)
+3. **Catch2 testing framework** (v3)
+
+### One-Time Setup
+
+```powershell
+cd c:\source\wolf\tests
+
+# Run setup script (interactive)
+.\setup.ps1
+
+# Or set manually:
+$env:BOOST_DIR = "c:\libraries\boost"
+$env:CATCH2_DIR = "c:\libraries\Catch2"
+
+# Make permanent:
+[Environment]::SetEnvironmentVariable('BOOST_DIR', 'c:\libraries\boost', 'User')
+[Environment]::SetEnvironmentVariable('CATCH2_DIR', 'c:\libraries\Catch2', 'User')
+```
+
+### Build Tests
+
+```powershell
+# Using PowerShell (recommended)
+cd tests
+.\build.ps1
+
+# Or using batch file
+.\build.bat
+
+# Clean build
+.\build.ps1 -Clean
+
+# Verbose output
+.\build.ps1 -Verbose
+```
+
+### Run Tests
+
+```powershell
+cd build
+
+# Run all tests
+.\router_test.exe
+.\web_server_test.exe
+
+# Run specific test case
+.\router_test.exe "[http_router]"
+.\web_server_test.exe "[http_request]"
+
+# List all test cases
+.\router_test.exe --list-tests
+.\web_server_test.exe --list-tests
+```
+
+## Directory Structure
+
+Your Catch2 installation should look like:
+
+```
+c:\libraries\Catch2\
+├── include\
+│   └── catch2\
+│       ├── catch_test_macros.hpp
+│       └── ...
+└── lib\
+    └── Catch2Maind.lib (or Catch2Main.lib)
+```
+
+Your Boost installation should look like:
+
+```
+c:\libraries\boost\
+├── include\
+│   └── boost\
+└── lib\
+    ├── libboost_json-*.lib
+    └── libboost_url-*.lib
+```
+
 ## Test Executables
 
 ### 1. Router Tests (`router_tests`)
