@@ -45,6 +45,10 @@ int main() {
     app->get("/ping", [](const wolf::http_request& /*req*/) {
         return "pong";
     });
+    
+    app->get("/hello", [](auto req) {
+        return "hello world";
+    });
 
     // Cookie examples
     app->get("/set-cookie", [](const wolf::http_request& /*req*/) {

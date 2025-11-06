@@ -1,6 +1,7 @@
 #include <boost/unordered_map.hpp>
 #include <boost/json.hpp>
 #include <boost/tuple/tuple.hpp>
+#include <boost/beast.hpp>
 #include <memory>
 #include <vector>
 #include <sstream>

@@ -60,7 +60,45 @@ curl http://localhost:8080/
 
 ## Building Examples
 
-### Option 1: Build all examples
+### Windows
+
+#### Option 1: Using build.bat (Direct clang++ compilation)
+**Requirements:**
+- LLVM/Clang compiler (clang++)
+- BOOST_ROOT environment variable set
+
+```powershell
+# Set BOOST_ROOT if not already set
+$env:BOOST_ROOT="C:\path\to\boost"
+
+# Run the build script
+.\build.bat
+```
+
+This will create executables directly in the `build` directory:
+- `build\example_router.exe`
+- `build\example_web.exe`
+- `build\test_client.exe`
+
+#### Option 2: Using build_cmake.bat (CMake with clang++ or MSVC)
+**Requirements:**
+- CMake 3.16+
+- BOOST_ROOT environment variable set
+- LLVM/Clang (preferred) or Visual Studio
+
+```powershell
+# Set BOOST_ROOT if not already set
+$env:BOOST_ROOT="C:\path\to\boost"
+
+# Run the CMake build script
+.\build_cmake.bat
+```
+
+Executables will be in `build` or `build\Release` directory depending on the generator.
+
+### macOS/Linux
+
+#### Option 1: Build all examples
 ```bash
 cd wolf
 mkdir -p build
@@ -69,7 +107,7 @@ cmake ..
 make example_router example_web
 ```
 
-### Option 2: Build specific example
+#### Option 2: Build specific example
 ```bash
 cd wolf
 mkdir -p build
@@ -80,13 +118,36 @@ make example_router
 make example_web
 ```
 
-### Option 3: Build examples separately
+#### Option 3: Build examples separately
 ```bash
 cd wolf/example
 mkdir -p build
 cd build
 cmake ..
 make
+```
+
+### Manual Compilation (Any Platform)
+
+**macOS/Linux:**
+```bash
+# Using g++
+g++ -std=c++23 -I.. -I$BOOST_ROOT/include \
+    example_web.cpp -o example_web \
+    -L$BOOST_ROOT/lib -lboost_json -lboost_url -lpthread
+
+# Using clang++
+clang++ -std=c++23 -I.. -I$BOOST_ROOT/include \
+    example_web.cpp -o example_web \
+    -L$BOOST_ROOT/lib -lboost_json -lboost_url -lpthread
+```
+
+**Windows (PowerShell):**
+```powershell
+# Using clang++
+clang++ -std=c++23 -I.. -I"$env:BOOST_ROOT" `
+    example_web.cpp -o example_web.exe `
+    -L"$env:BOOST_ROOT\stage\lib" -lboost_json -lboost_url -lws2_32 -lwsock32
 ```
 
 ## Adding Your Own Example
