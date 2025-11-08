@@ -1,4 +1,4 @@
-#include "../src/web_server.hpp"
+#include "../src/wolf.hpp"
 #include <iostream>
 #include <csignal>
 

@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <functional>
 #include <string>
-#include "../src/http_router.hpp"
+#include "../src/wolf.hpp"
 
 using namespace wolf;
 
