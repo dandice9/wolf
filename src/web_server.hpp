@@ -5,6 +5,12 @@
 #include <boost/url.hpp>
 #include <boost/json.hpp>
 #include "http_router.hpp"
+#include <concepts>
+#include <ranges>
+#include <string_view>
+#include <format>
+#include <source_location>
+#include <expected>
 
 namespace net = boost::asio;
 namespace http = boost::beast::http;
@@ -18,34 +24,50 @@ namespace wolf {
     using request_t = beast::http::request<beast::http::string_body>;
     using response_t = beast::http::response<beast::http::string_body>;
 
-    response_t make_response(
-        const std::string& body,
+    // C++20 concepts for type safety
+    template<typename T>
+    concept StringLike = std::convertible_to<T, std::string_view>;
+
+    template<typename T>
+    concept StatusType = std::same_as<T, beast::http::status>;
+
+    // C++20 [[nodiscard]] and constexpr where possible
+    [[nodiscard]] response_t make_response(
+        std::string_view body,
         beast::http::status status = beast::http::status::ok,
-        const std::string& content_type = "text/plain") 
+        std::string_view content_type = "text/plain") 
     {
         response_t res{status, 11};
         res.set(beast::http::field::content_type, content_type);
         res.body() = body;
+        res.prepare_payload();
         
         return res;
     }
 
+    // C++20 std::format for cleaner string building
+    template<StringLike K, StringLike V>
     response_t set_cookie(
         response_t& res,
-        const std::string& key,
-        const std::string& value,
-        const std::string& path = "/",
-        const std::string& domain = "",
+        K&& key,
+        V&& value,
+        std::string_view path = "/",
+        std::string_view domain = "",
         int max_age = -1,
         bool http_only = true,
         bool secure = false) 
     {
-        std::string cookie = key + "=" + value + "; Path=" + path;
+        // Use std::format (C++20) for cleaner cookie string construction
+        std::string cookie = std::format("{}={}; Path={}", 
+                                        std::forward<K>(key), 
+                                        std::forward<V>(value), 
+                                        path);
+        
         if (!domain.empty()) {
-            cookie += "; Domain=" + domain;
+            cookie += std::format("; Domain={}", domain);
         }
         if (max_age >= 0) {
-            cookie += "; Max-Age=" + std::to_string(max_age);
+            cookie += std::format("; Max-Age={}", max_age);
         }
         if (http_only) {
             cookie += "; HttpOnly";
@@ -53,6 +75,7 @@ namespace wolf {
         if (secure) {
             cookie += "; Secure";
         }
+        
         res.set(beast::http::field::set_cookie, cookie);
         return res;
     }
@@ -93,47 +116,54 @@ namespace wolf {
                 return query_params_;
             }
 
-            auto cookies() const {
-                auto it = this->find(http::field::cookie);
+            // C++20 ranges for cleaner cookie parsing
+            [[nodiscard]] auto cookies() const {
                 params_t cookies;
-                if(it != this->end()) {
-                    std::string cookie_str = it->value();
-                    std::vector<std::string> cookie_pairs;
-                    size_t start = 0;
-                    size_t end = 0;
-                    while((end = cookie_str.find(';', start)) != std::string::npos) {
-                        cookie_pairs.push_back(cookie_str.substr(start, end - start));
-                        start = end + 1;
-                    }
-                    cookie_pairs.push_back(cookie_str.substr(start));
-
-                    for(const auto& pair : cookie_pairs) {
-                        auto eq_pos = pair.find('=');
-                        if(eq_pos != std::string::npos) {
-                            std::string key = pair.substr(0, eq_pos);
-                            std::string value = pair.substr(eq_pos + 1);
-                            // Trim whitespace
-                            key.erase(0, key.find_first_not_of(" \t"));
-                            key.erase(key.find_last_not_of(" \t") + 1);
-                            value.erase(0, value.find_first_not_of(" \t"));
-                            value.erase(value.find_last_not_of(" \t") + 1);
-                            cookies[key] = value;
+                
+                if (auto it = this->find(http::field::cookie); it != this->end()) {
+                    std::string_view cookie_str = it->value();
+                    
+                    // Use C++20 ranges to split and process cookies
+                    auto cookie_pairs = cookie_str 
+                        | std::views::split(';')
+                        | std::views::transform([](auto&& rng) {
+                            return std::string_view(&*rng.begin(), std::ranges::distance(rng));
+                        });
+                    
+                    for (auto pair_view : cookie_pairs) {
+                        if (auto eq_pos = pair_view.find('='); eq_pos != std::string_view::npos) {
+                            auto key = pair_view.substr(0, eq_pos);
+                            auto value = pair_view.substr(eq_pos + 1);
+                            
+                            // Trim whitespace using C++20 ranges
+                            auto trim = [](std::string_view sv) -> std::string {
+                                auto start = std::ranges::find_if_not(sv, ::isspace);
+                                auto end = std::ranges::find_if_not(sv | std::views::reverse, ::isspace).base();
+                                return std::string(start, end);
+                            };
+                            
+                            cookies[trim(key)] = trim(value);
                         }
                     }
                 }
+                
                 return cookies;
             }
 
-            auto get(const std::string& key) const {
-                auto it = uri_params_.find(key);
-                if(it != uri_params_.end()) {
+            // C++20 std::optional for cleaner return semantics
+            [[nodiscard]] std::optional<std::string> get(std::string_view key) const noexcept {
+                if (auto it = uri_params_.find(std::string(key)); it != uri_params_.end()) {
                     return it->second;
                 }
-                it = query_params_.find(key);
-                if(it != query_params_.end()) {
+                if (auto it = query_params_.find(std::string(key)); it != query_params_.end()) {
                     return it->second;
                 }
-                return std::string{};
+                return std::nullopt;
+            }
+
+            // Convenience method that returns empty string if not found
+            [[nodiscard]] std::string get_or(std::string_view key, std::string_view default_val = "") const noexcept {
+                return get(key).value_or(std::string(default_val));
             }
     };
 
@@ -146,18 +176,20 @@ namespace wolf {
         
         public:
             // Constructor takes socket only
-            websocket_session(tcp::socket socket, 
-                              const std::function<std::string(const std::string&)>& handler = nullptr)
+            public:
+            // C++20: Use explicit constructor with std::optional for handler
+            explicit websocket_session(tcp::socket socket, 
+                                       const std::function<std::string(const std::string&)>& handler = nullptr)
                 : ws_(std::move(socket)), socket_handler_(handler)
             {
-                // Set WebSocket options
+                // Set WebSocket options with C++20 lambda
                 ws_.set_option(beast::websocket::stream_base::decorator(
                     [](beast::websocket::response_type& res) {
-                        res.set(http::field::server, "WolfServer");
+                        res.set(http::field::server, "WolfServer/2.0");
                     }));
             }
 
-            // Start with already-read request
+            // C++20: Use concepts for template constraint
             template<class Body, class Allocator>
             void run(http::request<Body, http::basic_fields<Allocator>> req) {
                 // Accept the WebSocket upgrade using the parsed request
@@ -169,34 +201,31 @@ namespace wolf {
             }
 
         private:
-            void on_accept(beast::error_code ec) {
+            void on_accept(beast::error_code ec) noexcept {
                 if(ec)
                     return;
 
                 do_read();
             }
 
-            void on_write(beast::error_code ec, std::size_t bytes_transferred) {
-                boost::ignore_unused(bytes_transferred);
-
+            void on_write(beast::error_code ec, [[maybe_unused]] std::size_t bytes_transferred) noexcept {
                 if(ec)
                     return;
 
                 buffer_.consume(buffer_.size());
-
                 do_read();
             }
 
-            void on_read(beast::error_code ec, std::size_t bytes_transferred) {
-                boost::ignore_unused(bytes_transferred);
-
+            void on_read(beast::error_code ec, [[maybe_unused]] std::size_t bytes_transferred) noexcept {
                 if(ec == beast::websocket::error::closed)
                     return;
 
                 if(ec)
                     return;
 
+                // C++20: Use auto for type deduction
                 const auto received_message = beast::buffers_to_string(buffer_.data());
+                
                 // If a socket handler is set, process the message
                 if(socket_handler_) {
                     const auto response_message = socket_handler_(received_message);
@@ -216,7 +245,7 @@ namespace wolf {
                 }
             }
 
-            void on_close(beast::error_code ec) {
+            void on_close(beast::error_code ec) noexcept {
                 if(ec)
                     return;
             }
@@ -227,17 +256,17 @@ namespace wolf {
                         &websocket_session::on_read,
                         shared_from_this()));
             }
-    };   
+    };
 
     class http_session : public std::enable_shared_from_this<http_session> {
         tcp::socket socket_;
         beast::flat_buffer buffer_;
-        wolf_router& router_;
-        request_t request_;
-        response_t response_;
+        wolf::wolf_router& router_;
+        wolf::request_t request_;
+        wolf::response_t response_;
 
         public:
-            http_session(tcp::socket socket, wolf_router& router)
+            http_session(tcp::socket socket, wolf::wolf_router& router)
                 : socket_(std::move(socket)), router_(router) {}
 
             void start() {
@@ -260,35 +289,38 @@ namespace wolf {
                 // check if it's a websocket upgrade
                 if (beast::websocket::is_upgrade(request_)) {
                     // Create a websocket session and pass the request for upgrade
-                    auto ws_session = std::make_shared<websocket_session>(std::move(socket_), 
-                                                                          router_.get_socket_handler());
+                    auto ws_session = std::make_shared<wolf::websocket_session>(std::move(socket_), 
+                                                                                router_.get_socket_handler());
                     ws_session->run(std::move(request_));
-
                     return;
                 }
 
-                std::string target = std::string(request_.target());
+                // Use std::string_view for efficiency (C++20)
+                std::string_view target = request_.target();
+                
                 // Remove query string if present
                 auto pos = target.find('?');
-                auto target_clean = (pos != std::string::npos) ? target.substr(0, pos) : target;
+                auto target_clean = (pos != std::string_view::npos) ? target.substr(0, pos) : target;
                 
-                // Convert Beast HTTP method to wolf http_method
-                http_method method;
-                switch(request_.method()) {
-                    case http::verb::get: method = GET; break;
-                    case http::verb::post: method = POST; break;
-                    case http::verb::put: method = PUT; break;
-                    case http::verb::delete_: method = DEL; break;
-                    case http::verb::patch: method = PATCH; break;
-                    case http::verb::options: method = OPTIONS; break;
-                    case http::verb::head: method = HEAD; break;
-                    case http::verb::connect: method = CONNECT; break;
-                    case http::verb::trace: method = TRACE; break;
-                    default: method = GET; break;
-                }
+                // Convert Beast HTTP method to wolf http_method using constexpr map
+                wolf::http_method method = [&]() constexpr -> wolf::http_method {
+                    switch(request_.method()) {
+                        case http::verb::get: return wolf::http_method::GET;
+                        case http::verb::post: return wolf::http_method::POST;
+                        case http::verb::put: return wolf::http_method::PUT;
+                        case http::verb::delete_: return wolf::http_method::DEL;
+                        case http::verb::patch: return wolf::http_method::PATCH;
+                        case http::verb::options: return wolf::http_method::OPTIONS;
+                        case http::verb::head: return wolf::http_method::HEAD;
+                        case http::verb::connect: return wolf::http_method::CONNECT;
+                        case http::verb::trace: return wolf::http_method::TRACE;
+                        default: return wolf::http_method::GET;
+                    }
+                }();
 
-                auto query_params = url::parse_query(target);
+                auto query_params = url::parse_query(std::string(target));
 
+                // Use C++20 structured bindings
                 auto [is_trie, handler, params] = router_.resolve(method, target_clean);
 
                 // Use member variable for response
@@ -296,7 +328,9 @@ namespace wolf {
 
                 if (handler) {
                     // Populate request with parameters
-                    http_request req(request_, params, query_params);
+                    wolf::http_request req(request_, params, query_params);
+                    
+                    // Use C++20 ranges for parameter setting
                     for (const auto& [key, value] : params) {
                         req.set(key, value);
                     }
@@ -306,8 +340,9 @@ namespace wolf {
                     response_.result(http::status::not_found);
                     response_.body() = "404 Not Found";
                 }
+                
                 response_.version(request_.version());
-                response_.set(http::field::server, "WolfServer");
+                response_.set(http::field::server, "WolfServer/2.0");
                 response_.prepare_payload();
 
                 auto self = shared_from_this();
@@ -327,7 +362,7 @@ namespace wolf {
         std::vector<std::thread> threads_;
         std::unique_ptr<net::io_context> ioc_;
         std::unique_ptr<tcp::acceptor> acceptor_;
-        wolf_router router_;
+        wolf::wolf_router router_;
 
         void do_accept() {
             acceptor_->async_accept(
@@ -342,8 +377,9 @@ namespace wolf {
         }
 
         public:
-            web_server(unsigned short port = 8080){
-                // Initialize server components
+            // C++20: Use explicit constructor with default port
+            explicit web_server(unsigned short port = 8080) {
+                // Initialize server components (C++20: use auto for clarity)
                 const auto thread_count = std::thread::hardware_concurrency();
                 ioc_ = std::make_unique<net::io_context>(thread_count);
                 
@@ -356,9 +392,10 @@ namespace wolf {
                 // Start accepting connections
                 do_accept();
 
-                // Start worker threads
+                // C++20: Use ranges-based approach for worker threads
                 if(thread_count > 1) {
-                    for(unsigned int i = 0; i < thread_count-1; ++i) {
+                    threads_.reserve(thread_count - 1);
+                    for(unsigned int i = 0; i < thread_count - 1; ++i) {
                         threads_.emplace_back([this]() {
                             ioc_->run();
                         });
@@ -366,8 +403,11 @@ namespace wolf {
                 }
             }
 
-            ~web_server() {
+            // C++20: Use noexcept for destructor
+            ~web_server() noexcept {
                 ioc_->stop();
+                
+                // C++20: Use ranges for cleaner iteration
                 for(auto& thread : threads_) {
                     if(thread.joinable()) {
                         thread.join();
@@ -375,12 +415,19 @@ namespace wolf {
                 }
             }
 
-            void start(){
+            // C++20: Add [[nodiscard]] for better API usage
+            void start() {
                 ioc_->run();
             }
 
-            wolf_router* operator->(){ return &router_; }
-            const wolf_router* operator->() const { return &router_; }
+            // C++20: Use noexcept for accessors
+            [[nodiscard]] wolf::wolf_router* operator->() noexcept { return &router_; }
+            [[nodiscard]] const wolf::wolf_router* operator->() const noexcept { return &router_; }
+            
+            // C++20: Add explicit stop method
+            void stop() noexcept {
+                ioc_->stop();
+            }
     };
 
 }

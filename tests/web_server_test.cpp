@@ -130,7 +130,7 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
             return res;
         });
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/test");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/test");
         REQUIRE_FALSE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.empty());
@@ -158,7 +158,7 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
             return res;
         });
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/users/123");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users/123");
         REQUIRE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.size() == 1);
@@ -180,10 +180,10 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
             return res;
         });
 
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/resource");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/resource");
         REQUIRE(handler1 != nullptr);
         
-        auto [is_trie2, handler2, params2] = router.resolve(POST, "/resource");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/resource");
         REQUIRE(handler2 != nullptr);
     }
 
@@ -194,7 +194,7 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
             return res;
         });
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/not-exists");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/not-exists");
         REQUIRE(handler == nullptr);
         REQUIRE_FALSE(is_trie);
         REQUIRE(params.empty());
@@ -213,7 +213,7 @@ TEST_CASE("Wolf Router - Complex routing scenarios", "[wolf_router]") {
                 return res;
             });
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/api/v1/users/123/posts/456");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/api/v1/users/123/posts/456");
         REQUIRE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.size() == 3);
@@ -238,12 +238,12 @@ TEST_CASE("Wolf Router - Complex routing scenarios", "[wolf_router]") {
         });
 
         // Static route should be found
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/api/health");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/api/health");
         REQUIRE_FALSE(is_trie1);
         REQUIRE(handler1 != nullptr);
 
         // Dynamic route should be found
-        auto [is_trie2, handler2, params2] = router.resolve(GET, "/api/users");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::GET, "/api/users");
         REQUIRE(is_trie2);
         REQUIRE(handler2 != nullptr);
         REQUIRE(params2.at("resource") == "users");
@@ -285,21 +285,21 @@ TEST_CASE("Wolf Router - Complex routing scenarios", "[wolf_router]") {
         });
 
         // Test all CRUD operations
-        auto [is_trie_list, handler_list, params_list] = router.resolve(GET, "/api/users");
+        auto [is_trie_list, handler_list, params_list] = router.resolve(http_method::GET, "/api/users");
         REQUIRE(handler_list != nullptr);
 
-        auto [is_trie_create, handler_create, params_create] = router.resolve(POST, "/api/users");
+        auto [is_trie_create, handler_create, params_create] = router.resolve(http_method::POST, "/api/users");
         REQUIRE(handler_create != nullptr);
 
-        auto [is_trie_get, handler_get, params_get] = router.resolve(GET, "/api/users/1");
+        auto [is_trie_get, handler_get, params_get] = router.resolve(http_method::GET, "/api/users/1");
         REQUIRE(handler_get != nullptr);
         REQUIRE(params_get.at("id") == "1");
 
-        auto [is_trie_update, handler_update, params_update] = router.resolve(PUT, "/api/users/1");
+        auto [is_trie_update, handler_update, params_update] = router.resolve(http_method::PUT, "/api/users/1");
         REQUIRE(handler_update != nullptr);
         REQUIRE(params_update.at("id") == "1");
 
-        auto [is_trie_delete, handler_delete, params_delete] = router.resolve(DEL, "/api/users/1");
+        auto [is_trie_delete, handler_delete, params_delete] = router.resolve(http_method::DEL, "/api/users/1");
         REQUIRE(handler_delete != nullptr);
         REQUIRE(params_delete.at("id") == "1");
     }

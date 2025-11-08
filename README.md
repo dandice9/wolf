@@ -1,6 +1,6 @@
-# 🐺 Wolf - Simple C++23 Web Framework
+# 🐺 Wolf - Modern C++20 Web Framework
 
-A header-only web framework that makes building HTTP servers simple and fun.
+A header-only, high-performance web framework leveraging C++20 features for type safety and expressiveness.
 
 ## ✨ Why Wolf?
 
@@ -56,6 +56,81 @@ cd build
 # In another terminal:
 curl http://localhost:8080/ping
 # Output: pong
+```
+
+## 🎯 C++20 Features
+
+Wolf leverages modern C++20 features for safety, performance, and expressiveness:
+
+### Type-Safe HTTP Methods
+```cpp
+// C++20: enum class for type safety
+using wolf::http_method;
+
+router.add_route(http_method::GET, "/users", handler);
+router.add_route(http_method::POST, "/users", handler);
+```
+
+### Concepts for Compile-Time Type Checking
+```cpp
+// RouteString concept ensures only valid route strings
+template<RouteString Path>
+void route(http_method method, Path&& path, http_handler handler);
+
+// StringLike concept for flexible string handling
+template<StringLike S>
+http_response make_response(http::status status, S&& body);
+```
+
+### std::optional for Safe Value Access
+```cpp
+// Returns std::optional instead of throwing or returning empty string
+auto user_id = req.get("id");  // std::optional<std::string>
+if (user_id) {
+    // Use *user_id safely
+}
+
+// Or use convenience method with default
+auto name = req.get_or("name", "Guest");
+```
+
+### std::format for String Formatting
+```cpp
+// Clean, type-safe string formatting
+auto response = std::format("User {} has {} posts", user_id, post_count);
+
+// Cookie generation with std::format
+set_cookie(res, "session", session_id, "/", 3600);
+```
+
+### C++20 Ranges for Data Processing
+```cpp
+// Cookie parsing using ranges and views
+auto cookies = req.cookies();  // Uses std::ranges::split_view
+
+// Clean iteration with structured bindings
+for (const auto& [name, value] : cookies) {
+    // Process cookie
+}
+```
+
+### Attributes for Better Code Quality
+```cpp
+// [[nodiscard]] ensures return values aren't ignored
+[[nodiscard]] std::optional<std::string> get(std::string_view key) const;
+
+// [[maybe_unused]] for intentionally unused parameters  
+void on_write(beast::error_code ec, [[maybe_unused]] std::size_t bytes);
+
+// constexpr for compile-time evaluation
+constexpr std::string_view method_to_string(http_method method);
+```
+
+### std::string_view for Zero-Copy Operations
+```cpp
+// Efficient string handling without allocations
+void process_route(std::string_view route);
+auto target_clean = request.target();  // Returns string_view
 ```
 
 ## 📖 Examples
@@ -332,17 +407,72 @@ Compile:
 
 ```powershell
 # Windows
-clang++ -std=c++23 -Iboost/include -Iwolf main.cpp -o app.exe -Lboost/lib -lws2_32 -lwsock32
+clang++ -std=c++20 -Iboost/include -Iwolf main.cpp -o app.exe -Lboost/lib -lws2_32 -lwsock32
 
 # Linux/macOS  
-clang++ -std=c++23 -I/usr/local/include -Iwolf main.cpp -o app -lboost_json -lpthread
+clang++ -std=c++20 -I/usr/local/include -Iwolf main.cpp -o app -lboost_json -lpthread
 ```
 
 ## 🎯 Requirements
 
-- **C++23** compiler (Clang 16+, GCC 12+, MSVC 2022+)
-- **Boost 1.89+** (included as boost.zip)
+- **C++20** compiler (Clang 14.0+, GCC 11+, MSVC 2022+)
+- **Boost 1.81+** with Beast, Asio, URL, JSON
 - **Catch2 v3** (optional, for running tests)
+
+### Compiler Requirements
+
+Wolf requires C++20 features:
+- Concepts and constraints
+- `std::format` (or `fmt` library as fallback)
+- `std::ranges` and views
+- `std::string_view` heterogeneous lookup
+- `std::optional` improvements
+- Designated initializers
+- `[[nodiscard]]`, `[[maybe_unused]]` attributes
+- `constexpr` improvements
+
+### Tested Compilers
+
+- ✅ Clang 14.0+ (macOS, Linux, Windows)
+- ✅ GCC 11+ (Linux)
+- ✅ MSVC 19.30+ / Visual Studio 2022 (Windows)
+
+## 🔄 Migration from Pre-C++20 Version
+
+If upgrading from an older Wolf version, note these breaking changes:
+
+### HTTP Method enum → enum class
+```cpp
+// Old (C++17)
+router.resolve(GET, "/path");
+
+// New (C++20)  
+router.resolve(http_method::GET, "/path");
+```
+
+### String returns → std::optional
+```cpp
+// Old (C++17)
+std::string value = req.get("key");  // Returns "" if not found
+
+// New (C++20)
+auto value = req.get("key");  // Returns std::optional<std::string>
+if (value) {
+    use(*value);
+}
+
+// Or use default value
+auto value = req.get_or("key", "default");
+```
+
+### boost::tuple → std::tuple
+```cpp
+// Old (C++17)
+boost::tuple<bool, handler, params> result = router.resolve(...);
+
+// New (C++20)
+auto [is_trie, handler, params] = router.resolve(...);  // Structured bindings
+```
 
 ## 🧪 Running Tests (Windows)
 

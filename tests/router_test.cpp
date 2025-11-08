@@ -45,8 +45,8 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         router.get("/users", simple_handler);
         router.post("/users", post_handler);
 
-        // Test GET /users
-        auto [is_trie, handler, params] = router.resolve(GET, "/users");
+        // Test GET /users (C++20: using enum class)
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users");
         REQUIRE_FALSE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.empty());
@@ -57,7 +57,7 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         REQUIRE(response.status_code == 200);
 
         // Test POST /users
-        auto [is_trie2, handler2, params2] = router.resolve(POST, "/users");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/users");
         REQUIRE_FALSE(is_trie2);
         REQUIRE(handler2 != nullptr);
         REQUIRE(params2.empty());
@@ -73,9 +73,9 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
               .post("/test2", post_handler)
               .put("/test3", user_handler);
 
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/test1");
-        auto [is_trie2, handler2, params2] = router.resolve(POST, "/test2");
-        auto [is_trie3, handler3, params3] = router.resolve(PUT, "/test3");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/test1");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/test2");
+        auto [is_trie3, handler3, params3] = router.resolve(http_method::PUT, "/test3");
 
         REQUIRE(handler1 != nullptr);
         REQUIRE(handler2 != nullptr);
@@ -94,31 +94,31 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
               .trace("/trace", simple_handler);
 
         // Test all methods - they should not throw
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/get");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/get");
         REQUIRE(handler1 != nullptr);
         
-        auto [is_trie2, handler2, params2] = router.resolve(POST, "/post");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/post");
         REQUIRE(handler2 != nullptr);
         
-        auto [is_trie3, handler3, params3] = router.resolve(PUT, "/put");
+        auto [is_trie3, handler3, params3] = router.resolve(http_method::PUT, "/put");
         REQUIRE(handler3 != nullptr);
         
-        auto [is_trie4, handler4, params4] = router.resolve(DEL, "/delete");
+        auto [is_trie4, handler4, params4] = router.resolve(http_method::DEL, "/delete");
         REQUIRE(handler4 != nullptr);
         
-        auto [is_trie5, handler5, params5] = router.resolve(PATCH, "/patch");
+        auto [is_trie5, handler5, params5] = router.resolve(http_method::PATCH, "/patch");
         REQUIRE(handler5 != nullptr);
         
-        auto [is_trie6, handler6, params6] = router.resolve(OPTIONS, "/options");
+        auto [is_trie6, handler6, params6] = router.resolve(http_method::OPTIONS, "/options");
         REQUIRE(handler6 != nullptr);
         
-        auto [is_trie7, handler7, params7] = router.resolve(HEAD, "/head");
+        auto [is_trie7, handler7, params7] = router.resolve(http_method::HEAD, "/head");
         REQUIRE(handler7 != nullptr);
         
-        auto [is_trie8, handler8, params8] = router.resolve(CONNECT, "/connect");
+        auto [is_trie8, handler8, params8] = router.resolve(http_method::CONNECT, "/connect");
         REQUIRE(handler8 != nullptr);
         
-        auto [is_trie9, handler9, params9] = router.resolve(TRACE, "/trace");
+        auto [is_trie9, handler9, params9] = router.resolve(http_method::TRACE, "/trace");
         REQUIRE(handler9 != nullptr);
     }
 
@@ -126,13 +126,13 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         router.get("/existing", simple_handler);
 
         // Non-existent route should return nullptr handler
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/nonexistent");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/nonexistent");
         REQUIRE(handler1 == nullptr);
         REQUIRE_FALSE(is_trie1);
         REQUIRE(params1.empty());
 
         // Wrong method for existing route should return nullptr handler
-        auto [is_trie2, handler2, params2] = router.resolve(POST, "/existing");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/existing");
         REQUIRE(handler2 == nullptr);
         REQUIRE_FALSE(is_trie2);
         REQUIRE(params2.empty());
@@ -145,14 +145,14 @@ TEST_CASE("Trie Router - Parameter routes", "[trie_router]") {
     SECTION("Single parameter routes") {
         router.get("/users/:id", parameterized_handler);
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/users/123");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users/123");
         REQUIRE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.size() == 1);
         REQUIRE(params.at("id") == "123");
 
         // Test with different parameter values
-        auto [is_trie2, handler2, params2] = router.resolve(GET, "/users/abc");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::GET, "/users/abc");
         REQUIRE(is_trie2);
         REQUIRE(params2.size() == 1);
         REQUIRE(params2.at("id") == "abc");
@@ -161,7 +161,7 @@ TEST_CASE("Trie Router - Parameter routes", "[trie_router]") {
     SECTION("Multiple parameter routes") {
         router.get("/users/:userId/posts/:postId", parameterized_handler);
 
-        auto [is_trie, handler, params] = router.resolve(GET, "/users/123/posts/456");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users/123/posts/456");
         REQUIRE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.size() == 2);
@@ -173,12 +173,12 @@ TEST_CASE("Trie Router - Parameter routes", "[trie_router]") {
         router.get("/api/users/:id", parameterized_handler)
               .get("/api/posts/:postId/comments/:commentId", parameterized_handler);
 
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/api/users/789");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/api/users/789");
         REQUIRE(is_trie1);
         REQUIRE(params1.size() == 1);
         REQUIRE(params1.at("id") == "789");
 
-        auto [is_trie2, handler2, params2] = router.resolve(GET, "/api/posts/100/comments/200");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::GET, "/api/posts/100/comments/200");
         REQUIRE(is_trie2);
         REQUIRE(params2.size() == 2);
         REQUIRE(params2.at("postId") == "100");
@@ -237,15 +237,15 @@ TEST_CASE("Trie Router - Direct trie testing", "[trie_router]") {
 
 TEST_CASE("HTTP Methods - Enum and string conversion", "[http_methods]") {
     SECTION("Method to string conversion") {
-        REQUIRE(method_to_string(GET) == "GET");
-        REQUIRE(method_to_string(POST) == "POST");
-        REQUIRE(method_to_string(PUT) == "PUT");
-        REQUIRE(method_to_string(DEL) == "DELETE");
-        REQUIRE(method_to_string(PATCH) == "PATCH");
-        REQUIRE(method_to_string(OPTIONS) == "OPTIONS");
-        REQUIRE(method_to_string(HEAD) == "HEAD");
-        REQUIRE(method_to_string(CONNECT) == "CONNECT");
-        REQUIRE(method_to_string(TRACE) == "TRACE");
+        REQUIRE(method_to_string(http_method::GET) == "GET");
+        REQUIRE(method_to_string(http_method::POST) == "POST");
+        REQUIRE(method_to_string(http_method::PUT) == "PUT");
+        REQUIRE(method_to_string(http_method::DEL) == "DELETE");
+        REQUIRE(method_to_string(http_method::PATCH) == "PATCH");
+        REQUIRE(method_to_string(http_method::OPTIONS) == "OPTIONS");
+        REQUIRE(method_to_string(http_method::HEAD) == "HEAD");
+        REQUIRE(method_to_string(http_method::CONNECT) == "CONNECT");
+        REQUIRE(method_to_string(http_method::TRACE) == "TRACE");
     }
 }
 
@@ -260,26 +260,26 @@ TEST_CASE("Integration - Mixed route types", "[integration]") {
               .post("/users/:id/posts", post_handler);
 
         // Test static route
-        auto [is_trie1, handler1, params1] = router.resolve(GET, "/users");
+        auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/users");
         REQUIRE_FALSE(is_trie1);
         REQUIRE(handler1 != nullptr);
         REQUIRE(params1.empty());
 
         // Test parameter route
-        auto [is_trie2, handler2, params2] = router.resolve(GET, "/users/123");
+        auto [is_trie2, handler2, params2] = router.resolve(http_method::GET, "/users/123");
         REQUIRE(is_trie2);
         REQUIRE(handler2 != nullptr);
         REQUIRE(params2.size() == 1);
         REQUIRE(params2.at("id") == "123");
 
         // Test another static route
-        auto [is_trie3, handler3, params3] = router.resolve(GET, "/users/profile");
+        auto [is_trie3, handler3, params3] = router.resolve(http_method::GET, "/users/profile");
         REQUIRE_FALSE(is_trie3);
         REQUIRE(handler3 != nullptr);
         REQUIRE(params3.empty());
 
         // Test parameter route with POST
-        auto [is_trie4, handler4, params4] = router.resolve(POST, "/users/456/posts");
+        auto [is_trie4, handler4, params4] = router.resolve(http_method::POST, "/users/456/posts");
         REQUIRE(is_trie4);
         REQUIRE(handler4 != nullptr);
         REQUIRE(params4.size() == 1);
@@ -293,7 +293,7 @@ TEST_CASE("Edge cases", "[edge_cases]") {
     SECTION("Empty routes") {
         router.get("/", simple_handler);
         
-        auto [is_trie, handler, params] = router.resolve(GET, "/");
+        auto [is_trie, handler, params] = router.resolve(http_method::GET, "/");
         REQUIRE_FALSE(is_trie);
         REQUIRE(handler != nullptr);
         REQUIRE(params.empty());
