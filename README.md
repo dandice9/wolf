@@ -279,6 +279,47 @@ auto auth = req[http::field::authorization];
 
 ### Response
 
+Wolf now supports a **modern fluent API** for building responses:
+
+```cpp
+// 🆕 NEW: Fluent API (Recommended!)
+namespace json = boost::json;
+
+// JSON response with status code
+return wolf::http_response(200).json(json::object{
+    {"message", "Success"},
+    {"data", json::array{1, 2, 3}}
+});
+
+// Created response (201)
+return wolf::http_response(201).json(json::object{{"id", 123}});
+
+// Error response with headers
+return wolf::http_response(404)
+    .header("X-Request-ID", "abc123")
+    .json(json::object{{"error", "Not Found"}});
+
+// Text response
+return wolf::http_response(200).text("Hello, World!");
+
+// HTML response
+return wolf::http_response(200).html("<h1>Welcome</h1>");
+
+// Response with cookie
+return wolf::http_response(200)
+    .json(json::object{{"status", "ok"}})
+    .cookie("session", "abc123", "/", "", 3600, true, false);
+
+// Complex chaining
+return wolf::http_response(200)
+    .header("X-API-Version", "1.0")
+    .header("X-RateLimit-Remaining", "99")
+    .json(data)
+    .cookie("tracking", "xyz", "/", "", 86400, false, false);
+```
+
+**Traditional approaches still work:**
+
 ```cpp
 // Option 1: Return string (simplest)
 return "Hello!";  // 200 OK, text/plain
@@ -298,6 +339,8 @@ res.set(http::field::cache_control, "no-cache");
 res.body() = R"({"status":"ok"})";
 return res;
 ```
+
+📖 **[See complete Fluent API documentation →](docs/FLUENT_API.md)**
 
 ### Cookies
 
