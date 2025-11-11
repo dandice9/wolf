@@ -17,6 +17,9 @@
 #include <source_location>
 
 namespace wolf {
+    // Forward declaration
+    class http_response;
+
     // C++20 enum class for type safety
     enum class http_method {
         GET,
@@ -56,6 +59,15 @@ namespace wolf {
 
     template<typename T>
     concept RouteString = std::convertible_to<T, std::string_view>;
+
+    // Forward declare response_t from boost::beast
+    namespace beast = boost::beast;
+    namespace http = beast::http;
+    using response_t = http::response<http::string_body>;
+
+    // Concept to check if type is derived from or same as response_t
+    template<typename T>
+    concept ResponseLike = std::derived_from<T, response_t> || std::same_as<T, response_t>;
 
     template <typename Res>
     class trie_router {
@@ -203,6 +215,16 @@ namespace wolf {
                 });
             }
 
+            // Overload for handlers returning types derived from response_t (e.g., http_response)
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& add(http_method method, T&& route, const std::function<R(PT)>& handler) {
+                return add(method, std::forward<T>(route), [handler](PT req) -> RT {
+                    // Call handler which returns derived type, then convert to base type
+                    return static_cast<RT>(handler(req));
+                });
+            }
+
             template<RouteString T>
             http_router& get(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::GET, std::forward<T>(route), handler);
@@ -210,6 +232,12 @@ namespace wolf {
 
             template<RouteString T>
             http_router& get(T&& route, const std::function<std::string(PT)>& handler) {
+                return add(http_method::GET, std::forward<T>(route), handler);
+            }
+
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& get(T&& route, const std::function<R(PT)>& handler) {
                 return add(http_method::GET, std::forward<T>(route), handler);
             }
 
@@ -223,6 +251,12 @@ namespace wolf {
                 return add(http_method::POST, std::forward<T>(route), handler);
             }
 
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& post(T&& route, const std::function<R(PT)>& handler) {
+                return add(http_method::POST, std::forward<T>(route), handler);
+            }
+
             template<RouteString T>
             http_router& put(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::PUT, std::forward<T>(route), handler);
@@ -230,6 +264,12 @@ namespace wolf {
 
             template<RouteString T>
             http_router& put(T&& route, const std::function<std::string(PT)>& handler) {
+                return add(http_method::PUT, std::forward<T>(route), handler);
+            }
+
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& put(T&& route, const std::function<R(PT)>& handler) {
                 return add(http_method::PUT, std::forward<T>(route), handler);
             }
 
@@ -243,6 +283,12 @@ namespace wolf {
                 return add(http_method::DEL, std::forward<T>(route), handler);
             }
 
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& del(T&& route, const std::function<R(PT)>& handler) {
+                return add(http_method::DEL, std::forward<T>(route), handler);
+            }
+
             template<RouteString T>
             http_router& patch(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::PATCH, std::forward<T>(route), handler);
@@ -253,6 +299,12 @@ namespace wolf {
                 return add(http_method::PATCH, std::forward<T>(route), handler);
             }
 
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& patch(T&& route, const std::function<R(PT)>& handler) {
+                return add(http_method::PATCH, std::forward<T>(route), handler);
+            }
+
             template<RouteString T>
             http_router& options(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::OPTIONS, std::forward<T>(route), handler);
@@ -260,6 +312,12 @@ namespace wolf {
 
             template<RouteString T>
             http_router& options(T&& route, const std::function<std::string(PT)>& handler) {
+                return add(http_method::OPTIONS, std::forward<T>(route), handler);
+            }
+
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& options(T&& route, const std::function<R(PT)>& handler) {
                 return add(http_method::OPTIONS, std::forward<T>(route), handler);
             }
             
@@ -273,6 +331,12 @@ namespace wolf {
                 return add(http_method::HEAD, std::forward<T>(route), handler);
             }
 
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& head(T&& route, const std::function<R(PT)>& handler) {
+                return add(http_method::HEAD, std::forward<T>(route), handler);
+            }
+
             template<RouteString T>
             http_router& connect(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::CONNECT, std::forward<T>(route), handler);
@@ -283,6 +347,12 @@ namespace wolf {
                 return add(http_method::CONNECT, std::forward<T>(route), handler);
             }
 
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& connect(T&& route, const std::function<R(PT)>& handler) {
+                return add(http_method::CONNECT, std::forward<T>(route), handler);
+            }
+
             template<RouteString T>
             http_router& trace(T&& route, const std::function<RT(PT)>& handler) {
                 return add(http_method::TRACE, std::forward<T>(route), handler);
@@ -290,6 +360,12 @@ namespace wolf {
 
             template<RouteString T>
             http_router& trace(T&& route, const std::function<std::string(PT)>& handler) {
+                return add(http_method::TRACE, std::forward<T>(route), handler);
+            }
+
+            template<RouteString T, ResponseLike R>
+            requires (!std::same_as<R, RT>)
+            http_router& trace(T&& route, const std::function<R(PT)>& handler) {
                 return add(http_method::TRACE, std::forward<T>(route), handler);
             }
 

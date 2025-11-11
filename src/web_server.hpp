@@ -274,6 +274,9 @@ namespace wolf {
             }
     };
 
+    // Forward declaration for router
+    class http_response;
+
     using wolf_router = http_router<response_t, http_request>;
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
