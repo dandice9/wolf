@@ -68,7 +68,7 @@ int main() {
         });
 
         // Example 5: DELETE with 204 No Content
-        server->delete_("/api/users/:id", [](const wolf::http_request& req) -> wolf::http_response {
+        server->del("/api/users/:id", [](const wolf::http_request& req) -> wolf::http_response {
             auto id = req.get_or("id", "0");
             
             // Simulate deletion

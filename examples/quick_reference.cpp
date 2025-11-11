@@ -41,7 +41,7 @@ int main() {
         });
 
         // 4. DELETE - Resource deleted (204 No Content)
-        server->delete_("/api/users/:id", [](const wolf::http_request& req) {
+        server->del("/api/users/:id", [](const wolf::http_request& req) {
             // 204 responses typically have no body
             return wolf::http_response(204).text("");
         });

@@ -155,7 +155,7 @@ int main() {
         });
 
         // Example 13: No Content response
-        server->delete_("/api/user/:id", [](const wolf::http_request& req) {
+        server->del("/api/user/:id", [](const wolf::http_request& req) {
             // Simulate deletion
             return wolf::http_response(204).text("");
         });
