@@ -150,6 +150,43 @@ namespace wolf {
                 return cookies;
             }
 
+            [[nodiscard]] auto headers() const {
+                params_t headers;
+                for (const auto& field : this->base()) {
+                    headers[std::string(field.name_string())] = std::string(field.value());
+                }
+                return headers;
+            }
+
+            auto find_query_param(std::string_view key) const -> std::optional<std::string> {
+                if (auto it = query_params_.find(std::string(key)); it != query_params_.end()) {
+                    return it->second;
+                }
+                return std::nullopt;
+            }
+
+            auto find_uri_param(std::string_view key) const -> std::optional<std::string> {
+                if (auto it = uri_params_.find(std::string(key)); it != uri_params_.end()) {
+                    return it->second;
+                }
+                return std::nullopt;
+            }
+
+            auto find_header(std::string_view key) const -> std::optional<std::string> {
+                if(auto it = this->find(key); it != this->end()) {
+                    return std::string(it->value());
+                }
+                return std::nullopt;
+            }
+
+            auto find_cookie(std::string_view key) const -> std::optional<std::string> {
+                auto cookies = this->cookies();
+                if(auto it = cookies.find(std::string(key)); it != cookies.end()) {
+                    return it->second;
+                }
+                return std::nullopt;
+            }
+
             // C++20 std::optional for cleaner return semantics
             [[nodiscard]] std::optional<std::string> get(std::string_view key) const noexcept {
                 if (auto it = uri_params_.find(std::string(key)); it != uri_params_.end()) {
@@ -158,6 +195,13 @@ namespace wolf {
                 if (auto it = query_params_.find(std::string(key)); it != query_params_.end()) {
                     return it->second;
                 }
+                if(auto it = this->cookies().find(std::string(key)); it != this->cookies().end()) {
+                    return it->second;
+                }
+                if(auto it = this->find(key); it != this->end()) {
+                    return std::string(it->value());
+                }
+                
                 return std::nullopt;
             }
 
@@ -273,9 +317,6 @@ namespace wolf {
                 return *this;
             }
     };
-
-    // Forward declaration for router
-    class http_response;
 
     using wolf_router = http_router<response_t, http_request>;
 
