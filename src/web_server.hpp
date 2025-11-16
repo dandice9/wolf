@@ -527,7 +527,7 @@ namespace wolf {
 
     class web_server {
         std::vector<std::thread> threads_;
-        std::unique_ptr<net::io_context> ioc_;
+        std::shared_ptr<net::io_context> ioc_;
         std::unique_ptr<tcp::acceptor> acceptor_;
         wolf::wolf_router router_;
 
@@ -544,6 +544,10 @@ namespace wolf {
         }
 
         public:
+            auto context() {
+                return ioc_;
+            }
+
             // C++20: Use explicit constructor with default port
             explicit web_server(unsigned short port = 8080) {
                 // Initialize server components (C++20: use auto for clarity)
