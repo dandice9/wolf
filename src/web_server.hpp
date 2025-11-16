@@ -11,6 +11,7 @@
 #include <format>
 #include <source_location>
 #include <expected>
+#include <functional>
 
 namespace net = boost::asio;
 namespace http = boost::beast::http;
@@ -318,6 +319,8 @@ namespace wolf {
             }
     };
 
+
+    using callback_t = std::function<http_response(const http_request&)>;
     using wolf_router = http_router<response_t, http_request>;
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
