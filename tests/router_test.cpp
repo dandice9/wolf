@@ -48,7 +48,7 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         // Test GET /users (C++20: using enum class)
         auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users");
         REQUIRE_FALSE(is_trie);
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.empty());
 
         MockRequest req{"/users", "GET", {}};
@@ -59,7 +59,7 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         // Test POST /users
         auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/users");
         REQUIRE_FALSE(is_trie2);
-        REQUIRE(handler2 != nullptr);
+        REQUIRE(static_cast<bool>(handler2));
         REQUIRE(params2.empty());
 
         MockRequest req2{"/users", "POST", {}};
@@ -77,9 +77,9 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
         auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/test2");
         auto [is_trie3, handler3, params3] = router.resolve(http_method::PUT, "/test3");
 
-        REQUIRE(handler1 != nullptr);
-        REQUIRE(handler2 != nullptr);
-        REQUIRE(handler3 != nullptr);
+        REQUIRE(static_cast<bool>(handler1));
+        REQUIRE(static_cast<bool>(handler2));
+        REQUIRE(static_cast<bool>(handler3));
     }
 
     SECTION("All HTTP methods") {
@@ -95,31 +95,31 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
 
         // Test all methods - they should not throw
         auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/get");
-        REQUIRE(handler1 != nullptr);
+        REQUIRE(static_cast<bool>(handler1));
         
         auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/post");
-        REQUIRE(handler2 != nullptr);
+        REQUIRE(static_cast<bool>(handler2));
         
         auto [is_trie3, handler3, params3] = router.resolve(http_method::PUT, "/put");
-        REQUIRE(handler3 != nullptr);
+        REQUIRE(static_cast<bool>(handler3));
         
         auto [is_trie4, handler4, params4] = router.resolve(http_method::DEL, "/delete");
-        REQUIRE(handler4 != nullptr);
+        REQUIRE(static_cast<bool>(handler4));
         
         auto [is_trie5, handler5, params5] = router.resolve(http_method::PATCH, "/patch");
-        REQUIRE(handler5 != nullptr);
+        REQUIRE(static_cast<bool>(handler5));
         
         auto [is_trie6, handler6, params6] = router.resolve(http_method::OPTIONS, "/options");
-        REQUIRE(handler6 != nullptr);
+        REQUIRE(static_cast<bool>(handler6));
         
         auto [is_trie7, handler7, params7] = router.resolve(http_method::HEAD, "/head");
-        REQUIRE(handler7 != nullptr);
+        REQUIRE(static_cast<bool>(handler7));
         
         auto [is_trie8, handler8, params8] = router.resolve(http_method::CONNECT, "/connect");
-        REQUIRE(handler8 != nullptr);
+        REQUIRE(static_cast<bool>(handler8));
         
         auto [is_trie9, handler9, params9] = router.resolve(http_method::TRACE, "/trace");
-        REQUIRE(handler9 != nullptr);
+        REQUIRE(static_cast<bool>(handler9));
     }
 
     SECTION("Route not found") {
@@ -127,13 +127,13 @@ TEST_CASE("HTTP Router - Basic functionality", "[http_router]") {
 
         // Non-existent route should return nullptr handler
         auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/nonexistent");
-        REQUIRE(handler1 == nullptr);
+        REQUIRE(!static_cast<bool>(handler1));
         REQUIRE_FALSE(is_trie1);
         REQUIRE(params1.empty());
 
         // Wrong method for existing route should return nullptr handler
         auto [is_trie2, handler2, params2] = router.resolve(http_method::POST, "/existing");
-        REQUIRE(handler2 == nullptr);
+        REQUIRE(!static_cast<bool>(handler2));
         REQUIRE_FALSE(is_trie2);
         REQUIRE(params2.empty());
     }
@@ -147,7 +147,7 @@ TEST_CASE("Trie Router - Parameter routes", "[trie_router]") {
 
         auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users/123");
         REQUIRE(is_trie);
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.size() == 1);
         REQUIRE(params.at("id") == "123");
 
@@ -163,7 +163,7 @@ TEST_CASE("Trie Router - Parameter routes", "[trie_router]") {
 
         auto [is_trie, handler, params] = router.resolve(http_method::GET, "/users/123/posts/456");
         REQUIRE(is_trie);
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.size() == 2);
         REQUIRE(params.at("userId") == "123");
         REQUIRE(params.at("postId") == "456");
@@ -200,7 +200,7 @@ TEST_CASE("Trie Router - Direct trie testing", "[trie_router]") {
         trie.insert("/users/:id", simple_handler);
         
         auto [handler, params] = trie.search("/users/123");
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.size() == 1);
         REQUIRE(params.at("id") == "123");
     }
@@ -209,7 +209,7 @@ TEST_CASE("Trie Router - Direct trie testing", "[trie_router]") {
         trie.insert("/users/:id", simple_handler);
         
         auto [handler, params] = trie.search("/posts/123");
-        REQUIRE(handler == nullptr);
+        REQUIRE(!static_cast<bool>(handler));
         REQUIRE(params.empty());
     }
 
@@ -217,7 +217,7 @@ TEST_CASE("Trie Router - Direct trie testing", "[trie_router]") {
         trie.insert("/api/:version/users/:userId/posts/:postId", parameterized_handler);
         
         auto [handler, params] = trie.search("/api/v1/users/123/posts/456");
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.size() == 3);
         
         // Verify all parameters
@@ -230,7 +230,7 @@ TEST_CASE("Trie Router - Direct trie testing", "[trie_router]") {
         trie.insert("/users/:id/posts", simple_handler);
         
         auto [handler, params] = trie.search("/users/123");
-        REQUIRE(handler == nullptr);
+        REQUIRE(!static_cast<bool>(handler));
         REQUIRE(params.empty());
     }
 }
@@ -262,26 +262,26 @@ TEST_CASE("Integration - Mixed route types", "[integration]") {
         // Test static route
         auto [is_trie1, handler1, params1] = router.resolve(http_method::GET, "/users");
         REQUIRE_FALSE(is_trie1);
-        REQUIRE(handler1 != nullptr);
+        REQUIRE(static_cast<bool>(handler1));
         REQUIRE(params1.empty());
 
         // Test parameter route
         auto [is_trie2, handler2, params2] = router.resolve(http_method::GET, "/users/123");
         REQUIRE(is_trie2);
-        REQUIRE(handler2 != nullptr);
+        REQUIRE(static_cast<bool>(handler2));
         REQUIRE(params2.size() == 1);
         REQUIRE(params2.at("id") == "123");
 
         // Test another static route
         auto [is_trie3, handler3, params3] = router.resolve(http_method::GET, "/users/profile");
         REQUIRE_FALSE(is_trie3);
-        REQUIRE(handler3 != nullptr);
+        REQUIRE(static_cast<bool>(handler3));
         REQUIRE(params3.empty());
 
         // Test parameter route with POST
         auto [is_trie4, handler4, params4] = router.resolve(http_method::POST, "/users/456/posts");
         REQUIRE(is_trie4);
-        REQUIRE(handler4 != nullptr);
+        REQUIRE(static_cast<bool>(handler4));
         REQUIRE(params4.size() == 1);
         REQUIRE(params4.at("id") == "456");
     }
@@ -295,7 +295,7 @@ TEST_CASE("Edge cases", "[edge_cases]") {
         
         auto [is_trie, handler, params] = router.resolve(http_method::GET, "/");
         REQUIRE_FALSE(is_trie);
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.empty());
     }
 
@@ -304,7 +304,7 @@ TEST_CASE("Edge cases", "[edge_cases]") {
         trie.insert("/users/:id/", simple_handler);
         
         auto [handler, params] = trie.search("/users/123/");
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.size() == 1);
         REQUIRE(params.at("id") == "123");
     }
@@ -315,6 +315,6 @@ TEST_CASE("Edge cases", "[edge_cases]") {
         
         // This should work as the split_route function handles multiple slashes
         auto [handler, params] = trie.search("/users/123");
-        REQUIRE(handler != nullptr);
+        REQUIRE(static_cast<bool>(handler));
     }
 }

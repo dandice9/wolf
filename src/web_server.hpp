@@ -321,24 +321,6 @@ namespace wolf {
             }
     };
 
-
-    // C++20: Type trait to check if type is Boost.Asio awaitable
-    // Boost.Asio awaitable doesn't satisfy the standard awaitable concept directly,
-    // so we use template specialization to detect it
-    template<typename T>
-    struct is_awaitable : std::false_type {};
-
-    // Specialize for boost::asio::awaitable
-    template<typename T>
-    struct is_awaitable<net::awaitable<T>> : std::true_type {};
-
-    template<typename T>
-    inline constexpr bool is_awaitable_v = is_awaitable<T>::value;
-
-    // Concept for types that are awaitable (Boost.Asio awaitable)
-    template<typename T>
-    concept Awaitable = is_awaitable_v<std::remove_cvref_t<T>>;
-
     using callback_t = std::function<http_response(const http_request&)>;
     using wolf_router = http_router<response_t, http_request>;
 
@@ -512,9 +494,14 @@ namespace wolf {
                         req.set(key, value);
                     }
                     
-                    // Execute handler (synchronously, as handlers are std::function)
-                    // For true async support, the handler would need to return net::awaitable
-                    response_ = handler(req);
+                    // Check if handler is async or sync
+                    if (handler.is_async()) {
+                        // Handler is async - await it
+                        response_ = co_await handler.async_call(req);
+                    } else {
+                        // Handler is synchronous - call directly
+                        response_ = handler(req);
+                    }
                 } else {
                     response_.result(http::status::not_found);
                     response_.body() = "404 Not Found";
