@@ -12,6 +12,8 @@
 #include <source_location>
 #include <expected>
 #include <functional>
+#include <coroutine>
+#include <type_traits>
 
 namespace net = boost::asio;
 namespace http = boost::beast::http;
@@ -320,6 +322,23 @@ namespace wolf {
     };
 
 
+    // C++20: Type trait to check if type is Boost.Asio awaitable
+    // Boost.Asio awaitable doesn't satisfy the standard awaitable concept directly,
+    // so we use template specialization to detect it
+    template<typename T>
+    struct is_awaitable : std::false_type {};
+
+    // Specialize for boost::asio::awaitable
+    template<typename T>
+    struct is_awaitable<net::awaitable<T>> : std::true_type {};
+
+    template<typename T>
+    inline constexpr bool is_awaitable_v = is_awaitable<T>::value;
+
+    // Concept for types that are awaitable (Boost.Asio awaitable)
+    template<typename T>
+    concept Awaitable = is_awaitable_v<std::remove_cvref_t<T>>;
+
     using callback_t = std::function<http_response(const http_request&)>;
     using wolf_router = http_router<response_t, http_request>;
 
@@ -434,19 +453,23 @@ namespace wolf {
                 http::async_read(socket_, buffer_, request_,
                     [this, self](beast::error_code ec, std::size_t bytes_transferred) {
                         if (!ec) {
-                            handle_request();
+                            net::co_spawn(
+                                socket_.get_executor(),
+                                handle_request(),
+                                net::detached
+                            );
                         }
                     });
             }
 
-            void handle_request() {
+            net::awaitable<void> handle_request() {
                 // check if it's a websocket upgrade
                 if (beast::websocket::is_upgrade(request_)) {
                     // Create a websocket session and pass the request for upgrade
                     auto ws_session = std::make_shared<wolf::websocket_session>(std::move(socket_), 
                                                                                 router_.get_socket_handler());
                     ws_session->run(std::move(request_));
-                    return;
+                    co_return;
                 }
 
                 // Use std::string_view for efficiency (C++20)
@@ -489,6 +512,8 @@ namespace wolf {
                         req.set(key, value);
                     }
                     
+                    // Execute handler (synchronously, as handlers are std::function)
+                    // For true async support, the handler would need to return net::awaitable
                     response_ = handler(req);
                 } else {
                     response_.result(http::status::not_found);
@@ -500,15 +525,16 @@ namespace wolf {
                 response_.prepare_payload();
 
                 auto self = shared_from_this();
-                http::async_write(socket_, response_,
-                    [this, self](beast::error_code ec, std::size_t) {
-                        if(ec || request_.need_eof()) {
-                            socket_.shutdown(tcp::socket::shutdown_send, ec);
-                            return;
-                        }
-                        
-                        do_read();
-                    });
+                co_await beast::http::async_write(socket_, response_, net::use_awaitable);
+                
+                if(request_.need_eof()) {
+                    beast::error_code ec;
+                    socket_.shutdown(tcp::socket::shutdown_send, ec);
+                } else {
+                    do_read();
+                }
+                
+                co_return;
             }
     };
 
