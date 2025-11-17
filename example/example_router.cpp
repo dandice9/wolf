@@ -54,11 +54,11 @@ int main() {
 
     // Test routes
     std::vector<std::pair<http_method, std::string>> test_routes = {
-        {GET, "/"},
-        {GET, "/users/123"},
-        {GET, "/users/456/posts/789"},
-        {POST, "/users"},
-        {GET, "/not-found"}  // Test non-existent route
+        {wolf::http_method::GET, "/"},
+        {wolf::http_method::GET, "/users/123"},
+        {wolf::http_method::GET, "/users/456/posts/789"},
+        {wolf::http_method::POST, "/users"},
+        {wolf::http_method::GET, "/not-found"}  // Test non-existent route
     };
 
     for (const auto& [method, path] : test_routes) {

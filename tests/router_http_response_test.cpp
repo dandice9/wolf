@@ -7,7 +7,7 @@ namespace json = boost::json;
 
 TEST_CASE("http_router - http_response return type", "[http_router][http_response]") {
     
-    wolf::wolf_router router;
+    wolf::wolf_router<false> router;
 
     SECTION("GET handler returning http_response with json") {
         router.get("/api/test", [](const wolf::http_request& req) -> wolf::http_response {

@@ -29,7 +29,8 @@ namespace wolf {
 
     using request_t = beast::http::request<beast::http::string_body>;
     using response_t = beast::http::response<beast::http::string_body>;
-    using callback_t = std::function<http_response(const http_request&)>;
+    using callback_t = std::function<wolf::http_response(const wolf::http_request&)>;
+    using async_callback_t = std::function<net::awaitable<wolf::http_response>(const wolf::http_request&)>;
 
     // C++20 concepts for type safety
     template<typename T>
@@ -325,7 +326,8 @@ namespace wolf {
             }
     };
 
-    using wolf_router = http_router<response_t, http_request>;
+    template<bool isAsync = true>
+    using wolf_router = http_router<std::conditional_t<isAsync, net::awaitable<http_response>, http_response>, http_request>;
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
         beast::flat_buffer buffer_;
@@ -416,15 +418,16 @@ namespace wolf {
             }
     };
 
-    class http_session : public std::enable_shared_from_this<http_session> {
+    template<bool Async = false>
+    class http_session : public std::enable_shared_from_this<http_session<Async>> {
         tcp::socket socket_;
         beast::flat_buffer buffer_;
-        wolf::wolf_router& router_;
+        wolf::wolf_router<Async>& router_;
         wolf::request_t request_;
         wolf::response_t response_;
 
         public:
-            http_session(tcp::socket socket, wolf::wolf_router& router)
+            http_session(tcp::socket socket, wolf::wolf_router<Async>& router)
                 : socket_(std::move(socket)), router_(router) {}
 
             void start() {
@@ -433,7 +436,7 @@ namespace wolf {
 
         private:
             void do_read() {
-                auto self = shared_from_this();
+                auto self = this->shared_from_this();
                 request_ = {};
                 http::async_read(socket_, buffer_, request_,
                     [this, self](beast::error_code ec, std::size_t bytes_transferred) {
@@ -497,12 +500,9 @@ namespace wolf {
                         req.set(key, value);
                     }
                     
-                    // Check if handler is async or sync
-                    if (handler.is_async()) {
-                        // Handler is async - await it
-                        response_ = co_await handler.async_call(req);
+                    if constexpr (Async) {
+                        response_ = co_await handler(req);
                     } else {
-                        // Handler is synchronous - call directly
                         response_ = handler(req);
                     }
                 } else {
@@ -514,7 +514,7 @@ namespace wolf {
                 response_.set(http::field::server, "WolfServer/2.0");
                 response_.prepare_payload();
 
-                auto self = shared_from_this();
+                auto self = this->shared_from_this();
                 co_await beast::http::async_write(socket_, response_, net::use_awaitable);
                 
                 if(request_.need_eof()) {
@@ -528,17 +528,18 @@ namespace wolf {
             }
     };
 
+    template<bool Async = false>
     class web_server {
         std::vector<std::thread> threads_;
         std::shared_ptr<net::io_context> ioc_;
         std::unique_ptr<tcp::acceptor> acceptor_;
-        wolf::wolf_router router_;
+        wolf::wolf_router<Async> router_;
 
         void do_accept() {
             acceptor_->async_accept(
                 [this](beast::error_code ec, tcp::socket socket) {
                     if (!ec) {
-                        std::make_shared<http_session>(std::move(socket), router_)->start();
+                        std::make_shared<http_session<Async>>(std::move(socket), router_)->start();
                     }
                     
                     // Accept next connection
@@ -595,8 +596,8 @@ namespace wolf {
             }
 
             // C++20: Use noexcept for accessors
-            [[nodiscard]] wolf::wolf_router* operator->() noexcept { return &router_; }
-            [[nodiscard]] const wolf::wolf_router* operator->() const noexcept { return &router_; }
+            [[nodiscard]] wolf::wolf_router<Async>* operator->() noexcept { return &router_; }
+            [[nodiscard]] const wolf::wolf_router<Async>* operator->() const noexcept { return &router_; }
 
             // C++20: Add explicit stop method
             void stop() noexcept {

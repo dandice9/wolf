@@ -86,57 +86,6 @@ namespace wolf {
     template<typename T>
     concept Awaitable = is_awaitable_v<T>;
 
-    // Unified handler wrapper that can hold both sync and async handlers
-    template<typename RT, typename PT>
-    class handler_wrapper {
-    public:
-        using sync_handler_t = std::function<RT(PT)>;
-        using async_handler_t = std::function<net::awaitable<RT>(PT)>;
-        
-        handler_wrapper() = default;
-        
-        // Constructor for sync handler
-        handler_wrapper(sync_handler_t handler) 
-            : sync_handler_(std::move(handler)), is_async_(false) {}
-        
-        // Constructor for async handler
-        handler_wrapper(async_handler_t handler) 
-            : async_handler_(std::move(handler)), is_async_(true) {}
-        
-        // Check if this is an async handler
-        [[nodiscard]] bool is_async() const noexcept { return is_async_; }
-        
-        // Call sync handler
-        [[nodiscard]] RT operator()(PT param) const {
-            if (!is_async_ && sync_handler_) {
-                return sync_handler_(param);
-            }
-            throw std::runtime_error("Cannot call sync handler on async wrapper");
-        }
-        
-        // Call async handler
-        [[nodiscard]] net::awaitable<RT> async_call(PT param) const {
-            if (is_async_ && async_handler_) {
-                co_return co_await async_handler_(param);
-            }
-            // Wrap sync handler in awaitable
-            if (!is_async_ && sync_handler_) {
-                co_return sync_handler_(param);
-            }
-            throw std::runtime_error("Handler not set");
-        }
-        
-        // Check if handler is set
-        [[nodiscard]] explicit operator bool() const noexcept {
-            return sync_handler_ || async_handler_;
-        }
-        
-    private:
-        sync_handler_t sync_handler_;
-        async_handler_t async_handler_;
-        bool is_async_ = false;
-    };
-
     template <typename Res>
     class trie_router {
         private:
@@ -230,7 +179,7 @@ namespace wolf {
                     }
 
                     if (!found) {
-                        return {Res{}, {}};
+                        return {nullptr, {}};
                     }
                 }
 
@@ -238,10 +187,9 @@ namespace wolf {
                     return {current->handler, params};
                 }
 
-                return {Res{}, {}};
+                return {nullptr, {}};
             }
     };
-
 
 
     template <typename RT, typename PT>
@@ -260,14 +208,13 @@ namespace wolf {
             template<RouteString T>
             http_router& add(http_method method, T&& route, const std::function<RT(PT)>& handler) {
                 std::string_view route_view = route;
-                handler_wrapper<RT, PT> wrapper(handler);
                 if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), wrapper);
+                    trie_router_.insert(std::forward<T>(route), handler);
                     return *this;
                 }
                 // Use std::format (C++20) for cleaner string building
                 auto key = std::format("{}:{}", method_to_string(method), route_view);
-                routes_[key] = wrapper;
+                routes_[key] = handler;
                 return *this;
             }
 
@@ -281,6 +228,15 @@ namespace wolf {
                     res.body() = handler(req);
                     res.prepare_payload();
                     return res;
+                });
+            }
+
+            // Overload for sync handlers on async routers - wrap sync response in coroutine
+            template<RouteString T>
+            requires std::same_as<RT, net::awaitable<http_response>>
+            http_router& add(http_method method, T&& route, const std::function<http_response(PT)>& handler) {
+                return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<http_response> {
+                    co_return handler(req);
                 });
             }
 
@@ -298,20 +254,19 @@ namespace wolf {
             template<RouteString T>
             http_router& add(http_method method, T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
                 std::string_view route_view = route;
-                handler_wrapper<RT, PT> wrapper(handler);
                 if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), wrapper);
-                    return *this;
+                    trie_router_.insert(std::forward<T>(route), handler);
+                    co_return *this;
                 }
                 auto key = std::format("{}:{}", method_to_string(method), route_view);
-                routes_[key] = wrapper;
-                return *this;
+                routes_[key] = handler;
+                co_return *this;
             }
 
             // Overload for async handlers returning net::awaitable<string>
             template<RouteString T>
             http_router& add(http_method method, T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
+                co_return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
                     RT res;
                     res.result(boost::beast::http::status::ok);
                     res.set(boost::beast::http::field::content_type, "text/plain");
@@ -325,300 +280,93 @@ namespace wolf {
             template<RouteString T, ResponseLike R>
             requires (!std::same_as<R, RT>)
             http_router& add(http_method method, T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
+                co_return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
                     co_return static_cast<RT>(co_await handler(req));
                 });
             }
 
-            template<RouteString T>
-            http_router& get(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
+            // Generic callable overloads that accept lambdas
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& get(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::GET, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T>
-            http_router& get(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
+            // Generic callable overload for POST
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& post(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::POST, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& get(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
+            // Generic callable overload for PUT
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& put(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::PUT, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T>
-            http_router& get(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
+            // Generic callable overload for DEL
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& del(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::DEL, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T>
-            http_router& get(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
+            // Generic callable overload for PATCH
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& patch(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::PATCH, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& get(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::GET, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& post(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& post(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& post(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& post(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& post(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& post(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::POST, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& put(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& put(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& put(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& put(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& put(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& put(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::PUT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& del(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& del(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& del(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& del(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& del(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& del(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::DEL, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& patch(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& patch(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& patch(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& patch(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& patch(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& patch(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::PATCH, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& options(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& options(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& options(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& options(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& options(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& options(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::OPTIONS, std::forward<T>(route), handler);
+            // Generic callable overload for OPTIONS
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& options(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::OPTIONS, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
             
-            template<RouteString T>
-            http_router& head(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
+            // Generic callable overload for HEAD
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& head(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::HEAD, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T>
-            http_router& head(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
+            // Generic callable overload for CONNECT
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& connect(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::CONNECT, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& head(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
+            // Generic callable overload for TRACE
+            template<RouteString T, typename Callable>
+            requires std::invocable<Callable, PT>
+            http_router& trace(T&& route, Callable&& handler) {
+                using result_t = std::invoke_result_t<Callable, PT>;
+                return add(http_method::TRACE, std::forward<T>(route), 
+                          std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            template<RouteString T>
-            http_router& head(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& head(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& head(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::HEAD, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& connect(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& connect(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& connect(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& connect(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& connect(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& connect(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::CONNECT, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& trace(T&& route, const std::function<RT(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& trace(T&& route, const std::function<std::string(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& trace(T&& route, const std::function<R(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& trace(T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T>
-            http_router& trace(T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& trace(T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                return add(http_method::TRACE, std::forward<T>(route), handler);
-            }
-
-            [[nodiscard]] std::pair<handler_wrapper<RT, PT>, params_t> resolve_trie(
+            [[nodiscard]] std::pair<std::function<RT(PT)>, params_t> resolve_trie(
                 http_method /*method*/, std::string_view route) const {
                 auto [handler, uri_params] = trie_router_.search(route);
 
@@ -626,12 +374,12 @@ namespace wolf {
                     return {handler, uri_params};
                 }
 
-                return {handler_wrapper<RT, PT>{}, {}};
+                return {nullptr, {}};
             }
 
             // Returns a tuple: (is_trie_route, handler, resolved_route_if_trie)
             // Using structured bindings (C++20)
-            [[nodiscard]] std::tuple<bool, handler_wrapper<RT, PT>, params_t> resolve(
+            [[nodiscard]] std::tuple<bool, std::function<RT(PT)>, params_t> resolve(
                 http_method method, std::string_view route) const noexcept {
                 // Use std::format for key construction (C++20)
                 auto key = std::format("{}:{}", method_to_string(method), route);
@@ -641,11 +389,12 @@ namespace wolf {
                 }
                 
                 auto [handler, uri_params] = resolve_trie(method, route);
+
                 if (handler) {
                     return {true, handler, uri_params};
                 }
 
-                return {false, handler_wrapper<RT, PT>{}, {}};
+                return {false, nullptr, {}};
             }
 
             [[nodiscard]] auto get_socket_handler() const noexcept {
@@ -658,8 +407,8 @@ namespace wolf {
             }
         
         private:
-            boost::unordered_map<std::string, handler_wrapper<RT, PT>> routes_;
-            trie_router<handler_wrapper<RT, PT>> trie_router_;
+            boost::unordered_map<std::string, std::function<RT(PT)>> routes_;
+            trie_router<std::function<RT(PT)>> trie_router_;
             std::function<std::string(const std::string&)> socket_handler_;
     };
 

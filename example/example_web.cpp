@@ -108,7 +108,9 @@ int main() {
         wolf::response_t res;
         res.result(http::status::ok);
         res.set(http::field::content_type, "application/json");
-        res.body() = R"({"id": )" + req.get("id") + R"(, "name": "Alice", "email": "alice@example.com"})";
+        auto id = req.params().at("id");
+        res.body() = R"({"id": ")" + id + R"(", "name": "Alice", "email": "alice@example.com"})";
+        res.prepare_payload();
         return res;
     });
 
@@ -162,9 +164,10 @@ int main() {
             body = R"({"email": "patched@example.com"})";
         }
 
-        auto id = req.get("id");
+        auto id = req.params().at("id");
 
-        res.body() = R"({"id": )" + id + R"(, "patched": true, "data": )" + body + "}";
+        res.body() = R"({"id": ")" + id + R"(", "patched": true, "data": )" + body + "}";
+        res.prepare_payload();
         return res;
     });
 
