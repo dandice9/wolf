@@ -24,8 +24,12 @@ namespace json = boost::json;
 using tcp = net::ip::tcp;
 
 namespace wolf {
+    class http_request;
+    class http_response;
+
     using request_t = beast::http::request<beast::http::string_body>;
     using response_t = beast::http::response<beast::http::string_body>;
+    using callback_t = std::function<http_response(const http_request&)>;
 
     // C++20 concepts for type safety
     template<typename T>
@@ -321,7 +325,6 @@ namespace wolf {
             }
     };
 
-    using callback_t = std::function<http_response(const http_request&)>;
     using wolf_router = http_router<response_t, http_request>;
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
