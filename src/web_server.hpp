@@ -595,10 +595,9 @@ namespace wolf {
             }
 
             // C++20: Use noexcept for accessors
-            [[nodiscard]] wolf::wolf_router* operator.() noexcept { return &router_; }
-            [[nodiscard]] const wolf::wolf_router* operator.() const noexcept { return &router_; }
+            [[nodiscard]] wolf::wolf_router* operator->() noexcept { return &router_; }
+            [[nodiscard]] const wolf::wolf_router* operator->() const noexcept { return &router_; }
 
-            
             // C++20: Add explicit stop method
             void stop() noexcept {
                 ioc_->stop();
