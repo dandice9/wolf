@@ -114,27 +114,27 @@ namespace wolf {
             }
         }
 
-        http::response<http::string_body> get_request(std::string_view url_str, const int port = 80)
+        inline http::response<http::string_body> get_request(std::string_view url_str, const int port = 80)
         {
             return detail::execute_request(url_str, http::verb::get, port);
         }
 
-        http::response<http::string_body> post_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
+        inline http::response<http::string_body> post_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
         {
             return detail::execute_request(url_str, http::verb::post, port, body, content_type);
         }
 
-        http::response<http::string_body> put_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
+        inline http::response<http::string_body> put_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
         {
             return detail::execute_request(url_str, http::verb::put, port, body, content_type);
         }
 
-        http::response<http::string_body> delete_request(std::string_view url_str, const int port = 80)
+        inline http::response<http::string_body> delete_request(std::string_view url_str, const int port = 80)
         {
             return detail::execute_request(url_str, http::verb::delete_, port);
         }
 
-        http::response<http::string_body> patch_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
+        inline http::response<http::string_body> patch_request(std::string_view url_str, const std::string& body, const std::string& content_type = "application/json", const int port = 80)
         {
             return detail::execute_request(url_str, http::verb::patch, port, body, content_type);
         }

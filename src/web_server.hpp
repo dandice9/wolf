@@ -40,7 +40,7 @@ namespace wolf {
     concept StatusType = std::same_as<T, beast::http::status>;
 
     // C++20 [[nodiscard]] and constexpr where possible
-    [[nodiscard]] response_t make_response(
+    [[nodiscard]] inline response_t make_response(
         std::string_view body,
         beast::http::status status = beast::http::status::ok,
         std::string_view content_type = "text/plain") 
