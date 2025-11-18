@@ -204,85 +204,96 @@ namespace wolf {
                        std::isalnum(static_cast<unsigned char>(route[sp_idx + 1]));
             }
 
-            // C++20 concepts for type safety
-            template<RouteString T>
-            http_router& add(http_method method, T&& route, const std::function<RT(PT)>& handler) {
+            // Unified add() for synchronous handlers (handles RT, string, ResponseLike)
+            template<RouteString T, typename Handler>
+            requires (!is_awaitable_v<std::invoke_result_t<Handler, PT>>)
+            http_router& add(http_method method, T&& route, Handler&& handler) {
+                using return_t = std::invoke_result_t<Handler, PT>;
+                
+                // Convert handler to the expected function signature
+                std::function<RT(PT)> wrapped_handler;
+                
+                if constexpr (std::same_as<return_t, RT>) {
+                    // Direct match - no conversion needed
+                    wrapped_handler = std::forward<Handler>(handler);
+                }
+                else if constexpr (std::same_as<return_t, std::string>) {
+                    // String-returning handler - wrap in response
+                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                        RT res;
+                        res.result(boost::beast::http::status::ok);
+                        res.set(boost::beast::http::field::content_type, "text/plain");
+                        res.body() = h(req);
+                        res.prepare_payload();
+                        return res;
+                    };
+                }
+                else if constexpr (std::same_as<RT, net::awaitable<http_response>> && 
+                                   std::same_as<return_t, http_response>) {
+                    // Sync handler on async router - wrap in coroutine
+                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> net::awaitable<http_response> {
+                        co_return h(req);
+                    };
+                }
+                else if constexpr (ResponseLike<return_t>) {
+                    // ResponseLike type - cast to RT
+                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                        return static_cast<RT>(h(req));
+                    };
+                }
+                
+                // Insert into router
                 std::string_view route_view = route;
                 if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), handler);
-                    return *this;
+                    trie_router_.insert(std::forward<T>(route), wrapped_handler);
+                } else {
+                    auto key = std::format("{}:{}", method_to_string(method), route_view);
+                    routes_[key] = wrapped_handler;
                 }
-                // Use std::format (C++20) for cleaner string building
-                auto key = std::format("{}:{}", method_to_string(method), route_view);
-                routes_[key] = handler;
                 return *this;
             }
 
-            // Overload for string-returning handlers (C++20 concepts)
-            template<RouteString T>
-            http_router& add(http_method method, T&& route, const std::function<std::string(PT)>& handler) {
-                return add(method, std::forward<T>(route), [handler](PT req) -> RT {
-                    RT res;
-                    res.result(boost::beast::http::status::ok);
-                    res.set(boost::beast::http::field::content_type, "text/plain");
-                    res.body() = handler(req);
-                    res.prepare_payload();
-                    return res;
-                });
-            }
-
-            // Overload for sync handlers on async routers - wrap sync response in coroutine
-            template<RouteString T>
-            requires std::same_as<RT, net::awaitable<http_response>>
-            http_router& add(http_method method, T&& route, const std::function<http_response(PT)>& handler) {
-                return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<http_response> {
-                    co_return handler(req);
-                });
-            }
-
-            // Overload for handlers returning types derived from response_t (e.g., http_response)
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& add(http_method method, T&& route, const std::function<R(PT)>& handler) {
-                return add(method, std::forward<T>(route), [handler](PT req) -> RT {
-                    // Call handler which returns derived type, then convert to base type
-                    return static_cast<RT>(handler(req));
-                });
-            }
-
-            // Overload for async handlers returning net::awaitable<RT>
-            template<RouteString T>
-            http_router& add(http_method method, T&& route, const std::function<net::awaitable<RT>(PT)>& handler) {
+            // Unified add() for asynchronous handlers (handles awaitable<RT>, awaitable<string>, awaitable<ResponseLike>)
+            template<RouteString T, typename Handler>
+            requires is_awaitable_v<std::invoke_result_t<Handler, PT>>
+            http_router& add(http_method method, T&& route, Handler&& handler) {
+                using return_t = std::invoke_result_t<Handler, PT>;
+                using inner_t = typename return_t::value_type; // Extract T from awaitable<T>
+                
+                // Convert handler to the expected function signature
+                std::function<RT(PT)> wrapped_handler;
+                
+                if constexpr (std::same_as<return_t, RT>) {
+                    // Direct match - no conversion needed
+                    wrapped_handler = std::forward<Handler>(handler);
+                }
+                else if constexpr (std::same_as<inner_t, std::string>) {
+                    // Awaitable<string> - wrap in response
+                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                        RT res;
+                        res.result(boost::beast::http::status::ok);
+                        res.set(boost::beast::http::field::content_type, "text/plain");
+                        res.body() = co_await h(req);
+                        res.prepare_payload();
+                        co_return res;
+                    };
+                }
+                else if constexpr (ResponseLike<inner_t>) {
+                    // Awaitable<ResponseLike> - cast to RT
+                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                        co_return static_cast<typename RT::value_type>(co_await h(req));
+                    };
+                }
+                
+                // Insert into router
                 std::string_view route_view = route;
                 if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), handler);
-                    co_return *this;
+                    trie_router_.insert(std::forward<T>(route), wrapped_handler);
+                } else {
+                    auto key = std::format("{}:{}", method_to_string(method), route_view);
+                    routes_[key] = wrapped_handler;
                 }
-                auto key = std::format("{}:{}", method_to_string(method), route_view);
-                routes_[key] = handler;
-                co_return *this;
-            }
-
-            // Overload for async handlers returning net::awaitable<string>
-            template<RouteString T>
-            http_router& add(http_method method, T&& route, const std::function<net::awaitable<std::string>(PT)>& handler) {
-                co_return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
-                    RT res;
-                    res.result(boost::beast::http::status::ok);
-                    res.set(boost::beast::http::field::content_type, "text/plain");
-                    res.body() = co_await handler(req);
-                    res.prepare_payload();
-                    co_return res;
-                });
-            }
-
-            // Overload for async handlers returning net::awaitable<ResponseLike>
-            template<RouteString T, ResponseLike R>
-            requires (!std::same_as<R, RT>)
-            http_router& add(http_method method, T&& route, const std::function<net::awaitable<R>(PT)>& handler) {
-                co_return add(method, std::forward<T>(route), [handler](PT req) -> net::awaitable<RT> {
-                    co_return static_cast<RT>(co_await handler(req));
-                });
+                return *this;
             }
 
             // Generic callable overloads that accept lambdas
