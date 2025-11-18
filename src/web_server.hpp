@@ -91,7 +91,7 @@ namespace wolf {
     class http_request : public request_t {
         params_t query_params_;
         params_t uri_params_;
-        boost::json::value json_body_;
+        boost::json::object json_body_;
         public:
             http_request(const request_t& req,
                          const params_t& uri_params,
@@ -104,11 +104,11 @@ namespace wolf {
                     }
                 }
                 boost::system::error_code ec;
-                json_body_ = json::parse(this->body(), ec);
+                json_body_ = json::parse(this->body(), ec).as_object();
 
                 if(ec) {
                     // Handle parse error if necessary
-                    json_body_ = nullptr; // or some default value
+                    json_body_ = {}; // or some default value
                 }
             }
 
