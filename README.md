@@ -62,9 +62,9 @@ curl http://localhost:8080/ping
 
 Wolf leverages modern C++20 features for safety, performance, and expressiveness:
 
-### ⚡ C++20 Coroutines for Async I/O (NEW!)
+### ⚡ C++20 Coroutines for Async I/O
 ```cpp
-// Wolf now uses coroutines internally for non-blocking request handling
+// Wolf uses coroutines internally for non-blocking request handling
 // Handlers execute efficiently without blocking threads
 wolf::web_server server(8080);
 
@@ -86,6 +86,31 @@ static_assert(!wolf::is_awaitable_v<int>);
 - 🔮 **Future-Ready**: Foundation for async handlers (database queries, external APIs)
 
 See [COROUTINE_IMPLEMENTATION.md](docs/COROUTINE_IMPLEMENTATION.md) for details.
+
+### 🔧 Simplified Router API (NEW!)
+```cpp
+// Consolidated from 7 overloads to just 2!
+// Uses C++20 concepts and if constexpr for compile-time type handling
+
+// All these work automatically:
+router.add(GET, "/text", [](auto req) { return "Hello"; });
+router.add(GET, "/json", [](auto req) { return http_response(200).json({...}); });
+router.add(GET, "/async", [](auto req) -> awaitable<http_response> { co_return ...; });
+
+// Type-safe detection at compile time
+template<typename Handler>
+concept SyncHandler = !is_awaitable_v<std::invoke_result_t<Handler, request_t>>;
+
+template<typename Handler>
+concept AsyncHandler = is_awaitable_v<std::invoke_result_t<Handler, request_t>>;
+```
+
+**Benefits:**
+- 🎯 **71% Less Code**: 7 overloads reduced to 2 unified methods
+- ✅ **Type-Safe**: Compile-time detection via concepts
+- 🚀 **Zero Overhead**: All branching resolved at compile-time with `if constexpr`
+- 🛡️ **Bug Fixes**: Removed incorrect `co_return *this` statements
+- 🧹 **Maintainable**: Single logic path for sync/async handling
 
 ### Type-Safe HTTP Methods
 ```cpp
@@ -466,6 +491,13 @@ kill -9 <PID>
 - 📊 **Performance**: Better thread utilization and scalability for concurrent requests
 - 🧪 **Tested**: Comprehensive test suite validates async behavior, concurrency, and keep-alive connections
 
+### Simplified Router API ⚡ NEW!
+- 🎯 **Reduced Overloads**: From 7 `add()` overloads down to 2 unified methods
+- ✅ **Concept-Based**: Uses C++20 concepts for sync/async handler detection
+- 🚀 **Compile-Time Branching**: `if constexpr` for zero runtime overhead
+- 🛡️ **Bug Fixes**: Removed incorrect `co_return *this` in previous async overloads
+- 🧹 **Cleaner Code**: Single implementation for each category (sync/async)
+
 ### Enhanced Testing
 - ✅ **107 assertions** across coroutine async features
 - ✅ Concurrent request handling validated
@@ -475,20 +507,36 @@ kill -9 <PID>
 
 ### Documentation
 - 📖 [Coroutine Implementation Guide](docs/COROUTINE_IMPLEMENTATION.md) - Architecture and implementation details
-- � [Test Coverage Report](docs/COROUTINE_TEST_COVERAGE.md) - Comprehensive test documentation
+- 📊 [Test Coverage Report](docs/COROUTINE_TEST_COVERAGE.md) - Comprehensive test documentation
+- 📖 [Fluent API Guide](docs/FLUENT_API.md) - Modern response building patterns
 - 📖 [Async Handler Support](src/async_handler_support.hpp) - Future async handler patterns
 
 ### Breaking Changes
-None! All existing synchronous handlers continue to work. The coroutine changes are internal only.
+None! All existing synchronous handlers continue to work. All improvements are backward compatible.
 
-## �📝 Project Structure
+## 🎉 Recent Improvements
+
+### v2.1 - Simplified Router API (Latest)
+- ✅ **71% Code Reduction**: 7 `add()` overloads consolidated to 2
+- ✅ **Concept-Based Detection**: Compile-time sync/async handler identification
+- ✅ **Zero Overhead**: All branching via `if constexpr` (compile-time)
+- ✅ **Bug Fixes**: Removed incorrect `co_return *this` statements
+- ✅ **All Tests Pass**: 100% backward compatible
+
+### v2.0 - Coroutine Architecture
+- ✅ **Non-Blocking I/O**: Request handling via C++20 coroutines
+- ✅ **Better Scalability**: More concurrent connections with fewer threads
+- ✅ **Type Traits**: `is_awaitable_v<T>` for detecting async types
+- ✅ **Fluent API**: Modern response builder with method chaining
+
+## 📝 Project Structure
 
 ```
 your-project/
 ├── main.cpp              # Your code
 ├── wolf/                 # Wolf framework (copy from this repo)
-│   ├── http_router.hpp
-│   ├── web_server.hpp   # Now with coroutine support!
+│   ├── http_router.hpp  # Simplified with 2 unified add() overloads!
+│   ├── web_server.hpp   # Coroutine-based async I/O
 │   └── async_handler_support.hpp  # Future async patterns
 └── boost/                # Extracted from boost.zip
     ├── include/
