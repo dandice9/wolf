@@ -103,12 +103,16 @@ namespace wolf {
                         query_params_[std::string(v.key)] = std::string(v.value);
                     }
                 }
+                
+                // Parse JSON body safely
                 boost::system::error_code ec;
-                json_body_ = json::parse(this->body(), ec).as_object();
-
-                if(ec) {
-                    // Handle parse error if necessary
-                    json_body_ = {}; // or some default value
+                auto parsed = json::parse(this->body(), ec);
+                
+                if(!ec && parsed.is_object()) {
+                    json_body_ = parsed.as_object();
+                } else {
+                    // Handle parse error or non-object body
+                    json_body_ = {};
                 }
             }
 
@@ -326,8 +330,9 @@ namespace wolf {
             }
     };
 
-    template<bool isAsync = true>
-    using wolf_router = http_router<std::conditional_t<isAsync, net::awaitable<http_response>, http_response>, http_request>;
+    // Unified router that automatically handles both sync and async handlers
+    // No need to choose upfront - just use wolf_router!
+    using wolf_router = http_router<net::awaitable<http_response>, http_request>;
 
     class websocket_session : public std::enable_shared_from_this<websocket_session> {
         beast::flat_buffer buffer_;
@@ -418,16 +423,16 @@ namespace wolf {
             }
     };
 
-    template<bool Async = false>
-    class http_session : public std::enable_shared_from_this<http_session<Async>> {
+    template<typename Router>
+    class http_session : public std::enable_shared_from_this<http_session<Router>> {
         tcp::socket socket_;
         beast::flat_buffer buffer_;
-        wolf::wolf_router<Async>& router_;
+        Router& router_;
         wolf::request_t request_;
         wolf::response_t response_;
 
         public:
-            http_session(tcp::socket socket, wolf::wolf_router<Async>& router)
+            http_session(tcp::socket socket, Router& router)
                 : socket_(std::move(socket)), router_(router) {}
 
             void start() {
@@ -500,11 +505,8 @@ namespace wolf {
                         req.set(key, value);
                     }
                     
-                    if constexpr (Async) {
-                        response_ = co_await handler(req);
-                    } else {
-                        response_ = handler(req);
-                    }
+                    // Router always returns awaitable now - unified handling
+                    response_ = co_await handler(req);
                 } else {
                     response_.result(http::status::not_found);
                     response_.body() = "404 Not Found";
@@ -528,18 +530,17 @@ namespace wolf {
             }
     };
 
-    template<bool Async = false>
     class web_server {
         std::vector<std::thread> threads_;
         std::shared_ptr<net::io_context> ioc_;
         std::unique_ptr<tcp::acceptor> acceptor_;
-        wolf::wolf_router<Async> router_;
+        wolf_router router_;
 
         void do_accept() {
             acceptor_->async_accept(
                 [this](beast::error_code ec, tcp::socket socket) {
                     if (!ec) {
-                        std::make_shared<http_session<Async>>(std::move(socket), router_)->start();
+                        std::make_shared<http_session<wolf_router>>(std::move(socket), router_)->start();
                     }
                     
                     // Accept next connection
@@ -596,8 +597,8 @@ namespace wolf {
             }
 
             // C++20: Use noexcept for accessors
-            [[nodiscard]] wolf::wolf_router<Async>* operator->() noexcept { return &router_; }
-            [[nodiscard]] const wolf::wolf_router<Async>* operator->() const noexcept { return &router_; }
+            [[nodiscard]] wolf_router* operator->() noexcept { return &router_; }
+            [[nodiscard]] const wolf_router* operator->() const noexcept { return &router_; }
 
             // C++20: Add explicit stop method
             void stop() noexcept {

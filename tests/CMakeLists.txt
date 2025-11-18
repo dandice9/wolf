@@ -43,12 +43,21 @@ target_link_libraries(router_http_response_tests
     ${Boost_LIBRARIES}
 )
 
+# Create async_coroutine test executable
+add_executable(async_coroutine_tests async_coroutine_test.cpp)
+target_link_libraries(async_coroutine_tests 
+    PRIVATE 
+    Catch2::Catch2WithMain
+    ${Boost_LIBRARIES}
+)
+
 # Enable testing
 enable_testing()
 add_test(NAME router_tests COMMAND router_tests)
 add_test(NAME web_server_tests COMMAND web_server_tests)
 add_test(NAME http_response_tests COMMAND http_response_tests)
 add_test(NAME router_http_response_tests COMMAND router_http_response_tests)
+add_test(NAME async_coroutine_tests COMMAND async_coroutine_tests)
 
 # Compiler-specific options
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -56,4 +65,5 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
     target_compile_options(web_server_tests PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(http_response_tests PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(router_http_response_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(async_coroutine_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()

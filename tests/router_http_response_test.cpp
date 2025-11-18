@@ -4,10 +4,25 @@
 #include <boost/json.hpp>
 
 namespace json = boost::json;
+namespace net = boost::asio;
+
+// Helper to run async handlers synchronously in tests
+template<typename Handler, typename Request>
+auto run_handler_sync(Handler&& handler, Request&& req) -> wolf::http_response {
+    net::io_context ioc;
+    wolf::http_response result;
+    
+    net::co_spawn(ioc, [&]() -> net::awaitable<void> {
+        result = co_await handler(std::forward<Request>(req));
+    }, net::detached);
+    
+    ioc.run();
+    return result;
+}
 
 TEST_CASE("http_router - http_response return type", "[http_router][http_response]") {
     
-    wolf::wolf_router<false> router;
+    wolf::wolf_router router;
 
     SECTION("GET handler returning http_response with json") {
         router.get("/api/test", [](const wolf::http_request& req) -> wolf::http_response {
@@ -26,7 +41,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/test");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         REQUIRE(response[boost::beast::http::field::content_type] == "application/json");
@@ -51,7 +66,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/users");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::created);
         REQUIRE(response[boost::beast::http::field::content_type] == "application/json");
@@ -75,7 +90,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/resource/42");
         wolf::http_request req(base_req, params, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
     }
@@ -96,7 +111,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/items/99");
         wolf::http_request req(base_req, params, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::no_content);
     }
@@ -119,7 +134,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/info");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         REQUIRE(response["X-Custom-Header"] == "CustomValue");
@@ -144,7 +159,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/login");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         
@@ -167,7 +182,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/health");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         REQUIRE(response[boost::beast::http::field::content_type] == "text/plain");
@@ -188,7 +203,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/page");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         REQUIRE(response[boost::beast::http::field::content_type] == "text/html");
@@ -214,7 +229,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/error");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::not_found);
         REQUIRE(response[boost::beast::http::field::content_type] == "application/json");
@@ -247,7 +262,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
             base_req.target("/api/resource");
             wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
             
-            auto response = handler(req);
+            auto response = run_handler_sync(handler, req);
             REQUIRE(response.result() == boost::beast::http::status::ok);
             
             auto parsed = json::parse(response.body());
@@ -264,7 +279,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
             base_req.target("/api/resource");
             wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
             
-            auto response = handler(req);
+            auto response = run_handler_sync(handler, req);
             REQUIRE(response.result() == boost::beast::http::status::created);
             
             auto parsed = json::parse(response.body());
@@ -281,7 +296,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
             base_req.target("/api/resource");
             wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
             
-            auto response = handler(req);
+            auto response = run_handler_sync(handler, req);
             REQUIRE(response.result() == boost::beast::http::status::ok);
             
             auto parsed = json::parse(response.body());
@@ -313,7 +328,7 @@ TEST_CASE("http_router - http_response return type", "[http_router][http_respons
         base_req.target("/api/complex");
         wolf::http_request req(base_req, {}, boost::urls::parse_query(""));
 
-        auto response = handler(req);
+        auto response = run_handler_sync(handler, req);
         
         REQUIRE(response.result() == boost::beast::http::status::ok);
         REQUIRE(response["X-Request-ID"] == "12345");

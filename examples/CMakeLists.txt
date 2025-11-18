@@ -25,6 +25,13 @@ target_link_libraries(example_web
     ${Boost_LIBRARIES}
 )
 
+# Example: Unified Router example
+add_executable(unified_router_example unified_router_example.cpp)
+target_link_libraries(unified_router_example 
+    PRIVATE 
+    ${Boost_LIBRARIES}
+)
+
 # Example: HTTP Test Client
 add_executable(test_client test_client.cpp)
 target_link_libraries(test_client 

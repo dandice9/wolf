@@ -192,6 +192,49 @@ namespace wolf {
     };
 
 
+    // Unified handler wrapper that can hold both sync and async handlers
+    template<typename PT>
+    class unified_handler {
+    public:
+        using sync_fn = std::function<response_t(PT)>;
+        using async_fn = std::function<net::awaitable<response_t>(PT)>;
+        using handler_variant = std::variant<std::monostate, sync_fn, async_fn>;
+        
+        unified_handler() = default;
+        
+        // Constructor for sync handlers
+        unified_handler(sync_fn fn) : handler_(std::move(fn)) {}
+        
+        // Constructor for async handlers
+        unified_handler(async_fn fn) : handler_(std::move(fn)) {}
+        
+        [[nodiscard]] bool is_async() const noexcept { 
+            return std::holds_alternative<async_fn>(handler_);
+        }
+        
+        [[nodiscard]] net::awaitable<response_t> operator()(PT req) const {
+            if (std::holds_alternative<async_fn>(handler_)) {
+                co_return co_await std::get<async_fn>(handler_)(req);
+            } else if (std::holds_alternative<sync_fn>(handler_)) {
+                co_return std::get<sync_fn>(handler_)(req);
+            } else {
+                // Empty handler - return error response
+                response_t res;
+                res.result(boost::beast::http::status::internal_server_error);
+                res.body() = "Handler not initialized";
+                res.prepare_payload();
+                co_return res;
+            }
+        }
+        
+        explicit operator bool() const noexcept {
+            return !std::holds_alternative<std::monostate>(handler_);
+        }
+        
+    private:
+        handler_variant handler_;
+    };
+
     template <typename RT, typename PT>
     class http_router {
         public:
@@ -219,27 +262,57 @@ namespace wolf {
                 }
                 else if constexpr (std::same_as<return_t, std::string>) {
                     // String-returning handler - wrap in response
-                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                        RT res;
-                        res.result(boost::beast::http::status::ok);
-                        res.set(boost::beast::http::field::content_type, "text/plain");
-                        res.body() = h(req);
-                        res.prepare_payload();
-                        return res;
-                    };
-                }
-                else if constexpr (std::same_as<RT, net::awaitable<http_response>> && 
-                                   std::same_as<return_t, http_response>) {
-                    // Sync handler on async router - wrap in coroutine
-                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> net::awaitable<http_response> {
-                        co_return h(req);
-                    };
+                    if constexpr (is_awaitable_v<RT>) {
+                        // Async mode - wrap in coroutine
+                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                            typename RT::value_type res;
+                            res.result(boost::beast::http::status::ok);
+                            res.set(boost::beast::http::field::content_type, "text/plain");
+                            res.body() = h(req);
+                            res.prepare_payload();
+                            co_return res;
+                        };
+                    } else {
+                        // Sync mode
+                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                            RT res;
+                            res.result(boost::beast::http::status::ok);
+                            res.set(boost::beast::http::field::content_type, "text/plain");
+                            res.body() = h(req);
+                            res.prepare_payload();
+                            return res;
+                        };
+                    }
                 }
                 else if constexpr (ResponseLike<return_t>) {
-                    // ResponseLike type - cast to RT
-                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                        return static_cast<RT>(h(req));
-                    };
+                    // ResponseLike type (response_t or http_response)
+                    if constexpr (is_awaitable_v<RT>) {
+                        // Async mode - wrap in coroutine
+                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                            auto response = h(req);
+                            // If RT::value_type is different from return_t, convert
+                            if constexpr (std::same_as<typename RT::value_type, return_t>) {
+                                co_return response;
+                            } else {
+                                // Convert response_t to http_response or vice versa
+                                typename RT::value_type result;
+                                result.result(response.result());
+                                result.body() = std::move(response.body());
+                                // Copy all headers
+                                for (auto const& field : response) {
+                                    result.set(field.name(), field.value());
+                                }
+                                result.version(response.version());
+                                result.prepare_payload();
+                                co_return result;
+                            }
+                        };
+                    } else {
+                        // Sync mode - cast if needed
+                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                            return static_cast<RT>(h(req));
+                        };
+                    }
                 }
                 
                 // Insert into router

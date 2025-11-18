@@ -117,18 +117,13 @@ TEST_CASE("HTTP Request - Parameter handling", "[http_request]") {
 }
 
 TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
-    wolf::wolf_router<false> router;
+    wolf::wolf_router router;
 
     SECTION("Basic route registration") {
         bool handler_called = false;
         
         router.get("/test", [&handler_called](const http_request& /*req*/) {
             handler_called = true;
-            // response_t res;
-            // res.result(http::status::ok);
-            // res.body() = "Test response";
-            // return res;
-
             return http_response(200).text("Test response");
         });
 
@@ -137,7 +132,8 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
         REQUIRE(static_cast<bool>(handler));
         REQUIRE(params.empty());
         
-        // Call the handler
+        // Call the handler via co_spawn since it now returns awaitable
+        net::io_context ioc;
         http::request<http::string_body> base_req;
         base_req.method(http::verb::get);
         base_req.target("/test");
@@ -146,10 +142,14 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
         auto query_result = boost::urls::parse_query("");
         http_request req(base_req, uri_params, query_result);
         
-        auto response = handler(req);
-        REQUIRE(handler_called);
-        REQUIRE(response.result() == http::status::ok);
-        REQUIRE(response.body() == "Test response");
+        net::co_spawn(ioc, [&]() -> net::awaitable<void> {
+            auto response = co_await handler(req);
+            REQUIRE(handler_called);
+            REQUIRE(response.result() == http::status::ok);
+            REQUIRE(response.body() == "Test response");
+        }, net::detached);
+        
+        ioc.run();
     }
 
     SECTION("Parameterized routes") {
@@ -208,7 +208,7 @@ TEST_CASE("Wolf Router - HTTP method mapping", "[wolf_router]") {
 }
 
 TEST_CASE("Wolf Router - Complex routing scenarios", "[wolf_router]") {
-    wolf::wolf_router<false> router;
+    wolf::wolf_router router;
 
     SECTION("Nested parameterized routes") {
         router.get("/api/:version/users/:userId/posts/:postId", 
