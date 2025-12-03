@@ -506,7 +506,6 @@ namespace wolf {
         tcp::socket socket_;
         beast::flat_buffer buffer_;
         Router& router_;
-        wolf::request_t request_;
         wolf::response_t response_;
 
         public:
@@ -514,100 +513,107 @@ namespace wolf {
                 : socket_(std::move(socket)), router_(router) {}
 
             void start() {
-                do_read();
+                net::co_spawn(
+                    socket_.get_executor(),
+                    handle_request(this->shared_from_this()),
+                    net::detached
+                );
             }
 
         private:
-            void do_read() {
-                auto self = this->shared_from_this();
-                request_ = {};
-                http::async_read(socket_, buffer_, request_,
-                    [this, self](beast::error_code ec, std::size_t bytes_transferred) {
-                        if (!ec) {
-                            net::co_spawn(
-                                socket_.get_executor(),
-                                handle_request(),
-                                net::detached
-                            );
-                        }
-                    });
-            }
-
-            net::awaitable<void> handle_request() {
-                // check if it's a websocket upgrade
-                if (beast::websocket::is_upgrade(request_)) {
-                    // Create a websocket session and pass the request for upgrade
-                    auto ws_session = std::make_shared<wolf::websocket_session>(std::move(socket_), 
-                                                                                router_.get_socket_handler());
-                    ws_session->run(std::move(request_));
-                    co_return;
-                }
-
-                // Use std::string_view for efficiency (C++20)
-                std::string_view target = request_.target();
-                
-                // Remove query string if present
-                auto pos = target.find('?');
-                auto target_clean = (pos != std::string_view::npos) ? target.substr(0, pos) : target;
-                
-                // Convert Beast HTTP method to wolf http_method using constexpr map
-                wolf::http_method method = [&]() constexpr -> wolf::http_method {
-                    switch(request_.method()) {
-                        case http::verb::get: return wolf::http_method::GET;
-                        case http::verb::post: return wolf::http_method::POST;
-                        case http::verb::put: return wolf::http_method::PUT;
-                        case http::verb::delete_: return wolf::http_method::DEL;
-                        case http::verb::patch: return wolf::http_method::PATCH;
-                        case http::verb::options: return wolf::http_method::OPTIONS;
-                        case http::verb::head: return wolf::http_method::HEAD;
-                        case http::verb::connect: return wolf::http_method::CONNECT;
-                        case http::verb::trace: return wolf::http_method::TRACE;
-                        default: return wolf::http_method::GET;
-                    }
-                }();
-
-                auto query_params = url::parse_query(std::string(target));
-
-                // Use C++20 structured bindings
-                auto [is_trie, handler, params] = router_.resolve(method, target_clean);
-
-                // Use local http_response to avoid slicing and memory corruption
-                wolf::http_response response;
-
-                std::cout << "DEBUG: handler=" << (handler ? "found" : "null") << " target=" << target_clean << std::endl;
-
-                if (handler) {
-                    // Populate request with parameters
-                    wolf::http_request req(request_, params, query_params);
-                    
-                    // Use C++20 ranges for parameter setting
-                    for (const auto& [key, value] : params) {
-                        req.set(key, value);
-                    }
-                    
-                    std::cout << "DEBUG: calling handler..." << std::endl;
-                    // Router always returns awaitable now - unified handling
-                    response = co_await handler(req);
-                    std::cout << "DEBUG: handler returned, body size=" << response.body().size() << std::endl;
-                } else {
-                    response.result(http::status::not_found);
-                    response.body() = "404 Not Found";
-                }
-                
-                response.version(request_.version() > 0 ? request_.version() : 11);
-                response.set(http::field::server, "WolfServer/2.0");
-                response.prepare_payload();
-
-                std::cout << "DEBUG: writing response..." << std::endl;
-                auto self = this->shared_from_this();
-                co_await beast::http::async_write(socket_, response, net::use_awaitable);
-                std::cout << "DEBUG: response written" << std::endl;
-                
-                if(request_.need_eof()) {
+            net::awaitable<void> handle_request(const std::shared_ptr<http_session> self) {
+                while (true)
+                {
+                    request_t request_;
                     beast::error_code ec;
-                    socket_.shutdown(tcp::socket::shutdown_send, ec);
-                } else {
-                    do_read();
+
+                    const auto read_bytes = co_await beast::http::async_read(socket_, buffer_, request_, net::redirect_error(net::use_awaitable, ec));
+
+                    if(ec == beast::http::error::end_of_stream) {
+                        // Gracefully close the socket
+                        socket_.shutdown(tcp::socket::shutdown_send, ec);
+                        break;
+                    }
+                    else if(ec) {
+                        std::cerr << "Read error: " << ec.message() << std::endl;
+                        break;
+                    }
+
+                    // check if it's a websocket upgrade
+                    if (beast::websocket::is_upgrade(request_)) {
+                        // Create a websocket session and pass the request for upgrade
+                        auto ws_session = std::make_shared<wolf::websocket_session>(std::move(socket_), 
+                                                                                    router_.get_socket_handler());
+                        ws_session->run(std::move(request_));
+                        
+                        break;
+                    }
+
+                    // Use std::string_view for efficiency (C++20)
+                    std::string_view target = request_.target();
+                    
+                    // Remove query string if present
+                    auto pos = target.find('?');
+                    auto target_clean = (pos != std::string_view::npos) ? target.substr(0, pos) : target;
+                    
+                    // Convert Beast HTTP method to wolf http_method using constexpr map
+                    wolf::http_method method = [&]() constexpr -> wolf::http_method {
+                        switch(request_.method()) {
+                            case http::verb::get: return wolf::http_method::GET;
+                            case http::verb::post: return wolf::http_method::POST;
+                            case http::verb::put: return wolf::http_method::PUT;
+                            case http::verb::delete_: return wolf::http_method::DEL;
+                            case http::verb::patch: return wolf::http_method::PATCH;
+                            case http::verb::options: return wolf::http_method::OPTIONS;
+                            case http::verb::head: return wolf::http_method::HEAD;
+                            case http::verb::connect: return wolf::http_method::CONNECT;
+                            case http::verb::trace: return wolf::http_method::TRACE;
+                            default: return wolf::http_method::GET;
+                        }
+                    }();
+
+                    auto query_params = url::parse_query(std::string(target));
+
+                    // Use C++20 structured bindings
+                    auto [is_trie, handler, params] = router_.resolve(method, target_clean);
+
+                    // Use local http_response to avoid slicing and memory corruption
+                    wolf::http_response response;
+
+                    std::cout << "DEBUG: handler=" << (handler ? "found" : "null") << " target=" << target_clean << std::endl;
+
+                    if (handler) {
+                        // Populate request with parameters
+                        wolf::http_request req(request_, params, query_params);
+                        
+                        // Use C++20 ranges for parameter setting
+                        for (const auto& [key, value] : params) {
+                            req.set(key, value);
+                        }
+                        
+                        std::cout << "DEBUG: calling handler..." << std::endl;
+                        // Router always returns awaitable now - unified handling
+                        response = co_await handler(req);
+                        std::cout << "DEBUG: handler returned, body size=" << response.body().size() << std::endl;
+                    } else {
+                        response.result(http::status::not_found);
+                        response.body() = "404 Not Found";
+                    }
+                    
+                    response.version(request_.version() > 0 ? request_.version() : 11);
+                    response.set(http::field::server, "WolfServer/2.0");
+                    response.prepare_payload();
+
+                    std::cout << "DEBUG: writing response..." << std::endl;
+                    auto self = this->shared_from_this();
+                    co_await beast::http::async_write(socket_, response, net::use_awaitable);
+                    std::cout << "DEBUG: response written" << std::endl;
+                    
+                    if(request_.need_eof()) {
+                        beast::error_code ec;
+                        socket_.shutdown(tcp::socket::shutdown_send, ec);
+                        break;
+                    }
                 }
                 
                 co_return;
