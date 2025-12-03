@@ -580,8 +580,6 @@ namespace wolf {
                     // Use local http_response to avoid slicing and memory corruption
                     wolf::http_response response;
 
-                    std::cout << "DEBUG: handler=" << (handler ? "found" : "null") << " target=" << target_clean << std::endl;
-
                     if (handler) {
                         // Populate request with parameters
                         wolf::http_request req(request_, params, query_params);
@@ -591,10 +589,8 @@ namespace wolf {
                             req.set(key, value);
                         }
                         
-                        std::cout << "DEBUG: calling handler..." << std::endl;
                         // Router always returns awaitable now - unified handling
                         response = co_await handler(req);
-                        std::cout << "DEBUG: handler returned, body size=" << response.body().size() << std::endl;
                     } else {
                         response.result(http::status::not_found);
                         response.body() = "404 Not Found";
@@ -604,10 +600,8 @@ namespace wolf {
                     response.set(http::field::server, "WolfServer/2.0");
                     response.prepare_payload();
 
-                    std::cout << "DEBUG: writing response..." << std::endl;
                     auto self = this->shared_from_this();
                     co_await beast::http::async_write(socket_, response, net::use_awaitable);
-                    std::cout << "DEBUG: response written" << std::endl;
                     
                     if(request_.need_eof()) {
                         beast::error_code ec;
