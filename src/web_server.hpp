@@ -534,8 +534,17 @@ namespace wolf {
                         socket_.shutdown(tcp::socket::shutdown_send, ec);
                         break;
                     }
+                    else if(ec == net::error::timed_out) {
+                        // Connection timed out, just exit
+                        break;
+                    }
+                    else if(ec == net::error::connection_reset) {
+                        // Connection reset by peer, just exit
+                        break;
+                    }
                     else if(ec) {
                         std::cerr << "Read error: " << ec.message() << std::endl;
+                        std::cerr << "Error code: " << ec.value() << std::endl;
                         break;
                     }
 
@@ -604,7 +613,6 @@ namespace wolf {
                     co_await beast::http::async_write(socket_, response, net::use_awaitable);
                     
                     if(request_.need_eof()) {
-                        beast::error_code ec;
                         socket_.shutdown(tcp::socket::shutdown_send, ec);
                         break;
                     }
@@ -683,6 +691,10 @@ namespace wolf {
             // C++20: Use noexcept for accessors
             [[nodiscard]] wolf_router* operator->() noexcept { return &router_; }
             [[nodiscard]] const wolf_router* operator->() const noexcept { return &router_; }
+
+            // Reference accessor for easier binding with .
+            [[nodiscard]] wolf_router& router() noexcept { return router_; }
+            [[nodiscard]] const wolf_router& router() const noexcept { return router_; }
 
             // C++20: Add explicit stop method
             void stop() noexcept {
