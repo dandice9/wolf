@@ -14,6 +14,7 @@
 #include <functional>
 #include <coroutine>
 #include <type_traits>
+#include <iostream>
 
 namespace net = boost::asio;
 namespace http = boost::beast::http;
@@ -246,50 +247,93 @@ namespace wolf {
 
             // C++20 concepts for type safety
             template<StatusType S>
-            http_response& set_status(S status) {
+            http_response& set_status(S status) & {
                 this->result(status);
                 return *this;
             }
 
+            template<StatusType S>
+            http_response set_status(S status) && {
+                this->result(status);
+                return std::move(*this);
+            }
+
             // Fluent API: Set JSON body with automatic content-type
-            [[nodiscard]] http_response& json(const boost::json::value& json_value) {
+            // Lvalue reference version - returns reference for chaining
+            [[nodiscard]] http_response& json(const boost::json::value& json_value) & {
                 this->set(beast::http::field::content_type, "application/json");
                 this->body() = boost::json::serialize(json_value);
                 this->prepare_payload();
                 return *this;
             }
 
+            // Rvalue reference version - returns by value to avoid dangling reference
+            [[nodiscard]] http_response json(const boost::json::value& json_value) && {
+                this->set(beast::http::field::content_type, "application/json");
+                this->body() = boost::json::serialize(json_value);
+                this->prepare_payload();
+                return std::move(*this);
+            }
+
             // Fluent API: Set JSON body from object (convertible to json::value)
-            [[nodiscard]] http_response& json(const boost::json::object& json_obj) {
+            [[nodiscard]] http_response& json(const boost::json::object& json_obj) & {
                 return json(boost::json::value(json_obj));
             }
 
+            [[nodiscard]] http_response json(const boost::json::object& json_obj) && {
+                return std::move(*this).json(boost::json::value(json_obj));
+            }
+
             // Fluent API: Set JSON body from array
-            [[nodiscard]] http_response& json(const boost::json::array& json_arr) {
+            [[nodiscard]] http_response& json(const boost::json::array& json_arr) & {
                 return json(boost::json::value(json_arr));
             }
 
+            [[nodiscard]] http_response json(const boost::json::array& json_arr) && {
+                return std::move(*this).json(boost::json::value(json_arr));
+            }
+
             // Fluent API: Set plain text body
-            [[nodiscard]] http_response& text(std::string_view body_text) {
+            [[nodiscard]] http_response& text(std::string_view body_text) & {
                 this->set(beast::http::field::content_type, "text/plain");
                 this->body() = body_text;
                 this->prepare_payload();
                 return *this;
             }
 
+            [[nodiscard]] http_response text(std::string_view body_text) && {
+                this->set(beast::http::field::content_type, "text/plain");
+                this->body() = body_text;
+                this->prepare_payload();
+                return std::move(*this);
+            }
+
             // Fluent API: Set HTML body
-            [[nodiscard]] http_response& html(std::string_view html_content) {
+            [[nodiscard]] http_response& html(std::string_view html_content) & {
                 this->set(beast::http::field::content_type, "text/html");
                 this->body() = html_content;
                 this->prepare_payload();
                 return *this;
             }
 
+            [[nodiscard]] http_response html(std::string_view html_content) && {
+                this->set(beast::http::field::content_type, "text/html");
+                this->body() = html_content;
+                this->prepare_payload();
+                return std::move(*this);
+            }
+
             // Fluent API: Set custom header
             template<StringLike K, StringLike V>
-            [[nodiscard]] http_response& header(K&& key, V&& value) {
+            [[nodiscard]] http_response& header(K&& key, V&& value) & {
                 this->set(std::forward<K>(key), std::forward<V>(value));
                 return *this;
+            }
+
+            template<StringLike K, StringLike V>
+            [[nodiscard]] http_response header(K&& key, V&& value) && {
+                this->set(std::forward<K>(key), std::forward<V>(value));
+                return std::move(*this);
             }
 
             // Fluent API: Set cookie (convenience wrapper)
@@ -301,16 +345,31 @@ namespace wolf {
                 std::string_view domain = "",
                 int max_age = -1,
                 bool http_only = true,
-                bool secure = false) 
+                bool secure = false) &
             {
                 set_cookie(*this, std::forward<K>(key), std::forward<V>(value), 
                           path, domain, max_age, http_only, secure);
                 return *this;
             }
 
+            template<StringLike K, StringLike V>
+            [[nodiscard]] http_response cookie(
+                K&& key,
+                V&& value,
+                std::string_view path = "/",
+                std::string_view domain = "",
+                int max_age = -1,
+                bool http_only = true,
+                bool secure = false) &&
+            {
+                set_cookie(*this, std::forward<K>(key), std::forward<V>(value), 
+                          path, domain, max_age, http_only, secure);
+                return std::move(*this);
+            }
+
             // Fluent API: Send file (set content-disposition)
             [[nodiscard]] http_response& send_file(std::string_view filename, 
-                                                   std::string_view content_type = "application/octet-stream") {
+                                                   std::string_view content_type = "application/octet-stream") & {
                 this->set(beast::http::field::content_type, content_type);
                 this->set(beast::http::field::content_disposition, 
                          std::format("attachment; filename=\"{}\"", filename));
@@ -318,15 +377,34 @@ namespace wolf {
                 return *this;
             }
 
+            [[nodiscard]] http_response send_file(std::string_view filename, 
+                                                  std::string_view content_type = "application/octet-stream") && {
+                this->set(beast::http::field::content_type, content_type);
+                this->set(beast::http::field::content_disposition, 
+                         std::format("attachment; filename=\"{}\"", filename));
+                this->prepare_payload();
+                return std::move(*this);
+            }
+
             // Fluent API: Set status and return reference for chaining
-            [[nodiscard]] http_response& status(int status_code) {
+            [[nodiscard]] http_response& status(int status_code) & {
                 this->result(static_cast<beast::http::status>(status_code));
                 return *this;
             }
 
-            [[nodiscard]] http_response& status(beast::http::status status_val) {
+            [[nodiscard]] http_response status(int status_code) && {
+                this->result(static_cast<beast::http::status>(status_code));
+                return std::move(*this);
+            }
+
+            [[nodiscard]] http_response& status(beast::http::status status_val) & {
                 this->result(status_val);
                 return *this;
+            }
+
+            [[nodiscard]] http_response status(beast::http::status status_val) && {
+                this->result(status_val);
+                return std::move(*this);
             }
     };
 
@@ -493,8 +571,10 @@ namespace wolf {
                 // Use C++20 structured bindings
                 auto [is_trie, handler, params] = router_.resolve(method, target_clean);
 
-                // Use member variable for response
-                response_ = {};
+                // Use local http_response to avoid slicing and memory corruption
+                wolf::http_response response;
+
+                std::cout << "DEBUG: handler=" << (handler ? "found" : "null") << " target=" << target_clean << std::endl;
 
                 if (handler) {
                     // Populate request with parameters
@@ -505,19 +585,23 @@ namespace wolf {
                         req.set(key, value);
                     }
                     
+                    std::cout << "DEBUG: calling handler..." << std::endl;
                     // Router always returns awaitable now - unified handling
-                    response_ = co_await handler(req);
+                    response = co_await handler(req);
+                    std::cout << "DEBUG: handler returned, body size=" << response.body().size() << std::endl;
                 } else {
-                    response_.result(http::status::not_found);
-                    response_.body() = "404 Not Found";
+                    response.result(http::status::not_found);
+                    response.body() = "404 Not Found";
                 }
                 
-                response_.version(request_.version());
-                response_.set(http::field::server, "WolfServer/2.0");
-                response_.prepare_payload();
+                response.version(request_.version() > 0 ? request_.version() : 11);
+                response.set(http::field::server, "WolfServer/2.0");
+                response.prepare_payload();
 
+                std::cout << "DEBUG: writing response..." << std::endl;
                 auto self = this->shared_from_this();
-                co_await beast::http::async_write(socket_, response_, net::use_awaitable);
+                co_await beast::http::async_write(socket_, response, net::use_awaitable);
+                std::cout << "DEBUG: response written" << std::endl;
                 
                 if(request_.need_eof()) {
                     beast::error_code ec;
