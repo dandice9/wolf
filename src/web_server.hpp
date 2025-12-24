@@ -16,6 +16,9 @@
 #include <type_traits>
 #include <iostream>
 
+#include "http_request.hpp"
+#include "http_response.hpp"
+
 namespace net = boost::asio;
 namespace http = boost::beast::http;
 namespace url = boost::urls;
@@ -25,20 +28,8 @@ namespace json = boost::json;
 using tcp = net::ip::tcp;
 
 namespace wolf {
-    class http_request;
-    class http_response;
-
-    using request_t = beast::http::request<beast::http::string_body>;
-    using response_t = beast::http::response<beast::http::string_body>;
     using callback_t = std::function<wolf::http_response(const wolf::http_request&)>;
     using async_callback_t = std::function<net::awaitable<wolf::http_response>(const wolf::http_request&)>;
-
-    // C++20 concepts for type safety
-    template<typename T>
-    concept StringLike = std::convertible_to<T, std::string_view>;
-
-    template<typename T>
-    concept StatusType = std::same_as<T, beast::http::status>;
 
     // C++20 [[nodiscard]] and constexpr where possible
     [[nodiscard]] inline response_t make_response(
@@ -88,325 +79,6 @@ namespace wolf {
         res.set(beast::http::field::set_cookie, cookie);
         return res;
     }
-
-    class http_request : public request_t {
-        params_t query_params_;
-        params_t uri_params_;
-        boost::json::object json_body_;
-        public:
-            http_request(const request_t& req,
-                         const params_t& uri_params,
-                         const decltype(url::parse_query(std::string()))& query_params)
-                : request_t(req), uri_params_(uri_params)
-            {
-                if(query_params) {  
-                    for(const auto v : *query_params) {
-                        query_params_[std::string(v.key)] = std::string(v.value);
-                    }
-                }
-                
-                // Parse JSON body safely
-                boost::system::error_code ec;
-                auto parsed = json::parse(this->body(), ec);
-                
-                if(!ec && parsed.is_object()) {
-                    json_body_ = parsed.as_object();
-                } else {
-                    // Handle parse error or non-object body
-                    json_body_ = {};
-                }
-            }
-
-            auto get_json_body() const {
-                return json_body_;
-            }
-
-            auto params() const {
-                return uri_params_;
-            }
-
-            auto query_params() const {
-                return query_params_;
-            }
-
-            // C++20 ranges for cleaner cookie parsing
-            [[nodiscard]] auto cookies() const {
-                params_t cookies;
-                
-                if (auto it = this->find(http::field::cookie); it != this->end()) {
-                    std::string_view cookie_str = it->value();
-                    
-                    // Use C++20 ranges to split and process cookies
-                    auto cookie_pairs = cookie_str 
-                        | std::views::split(';')
-                        | std::views::transform([](auto&& rng) {
-                            return std::string_view(&*rng.begin(), std::ranges::distance(rng));
-                        });
-                    
-                    for (auto pair_view : cookie_pairs) {
-                        if (auto eq_pos = pair_view.find('='); eq_pos != std::string_view::npos) {
-                            auto key = pair_view.substr(0, eq_pos);
-                            auto value = pair_view.substr(eq_pos + 1);
-                            
-                            // Trim whitespace using C++20 ranges
-                            auto trim = [](std::string_view sv) -> std::string {
-                                auto start = std::ranges::find_if_not(sv, ::isspace);
-                                auto end = std::ranges::find_if_not(sv | std::views::reverse, ::isspace).base();
-                                return std::string(start, end);
-                            };
-                            
-                            cookies[trim(key)] = trim(value);
-                        }
-                    }
-                }
-                
-                return cookies;
-            }
-
-            [[nodiscard]] auto headers() const {
-                params_t headers;
-                for (const auto& field : this->base()) {
-                    headers[std::string(field.name_string())] = std::string(field.value());
-                }
-                return headers;
-            }
-
-            auto find_query_param(std::string_view key) const -> std::optional<std::string> {
-                if (auto it = query_params_.find(std::string(key)); it != query_params_.end()) {
-                    return it->second;
-                }
-                return std::nullopt;
-            }
-
-            auto find_uri_param(std::string_view key) const -> std::optional<std::string> {
-                if (auto it = uri_params_.find(std::string(key)); it != uri_params_.end()) {
-                    return it->second;
-                }
-                return std::nullopt;
-            }
-
-            auto find_header(std::string_view key) const -> std::optional<std::string> {
-                if(auto it = this->find(key); it != this->end()) {
-                    return std::string(it->value());
-                }
-                return std::nullopt;
-            }
-
-            auto find_cookie(std::string_view key) const -> std::optional<std::string> {
-                auto cookies = this->cookies();
-                if(auto it = cookies.find(std::string(key)); it != cookies.end()) {
-                    return it->second;
-                }
-                return std::nullopt;
-            }
-
-            // C++20 std::optional for cleaner return semantics
-            [[nodiscard]] std::optional<std::string> get(std::string_view key) const noexcept {
-                if (auto it = uri_params_.find(std::string(key)); it != uri_params_.end()) {
-                    return it->second;
-                }
-                if (auto it = query_params_.find(std::string(key)); it != query_params_.end()) {
-                    return it->second;
-                }
-                if(auto it = this->cookies().find(std::string(key)); it != this->cookies().end()) {
-                    return it->second;
-                }
-                if(auto it = this->find(key); it != this->end()) {
-                    return std::string(it->value());
-                }
-                
-                return std::nullopt;
-            }
-
-            // Convenience method that returns empty string if not found
-            [[nodiscard]] std::string get_or(std::string_view key, std::string_view default_val = "") const noexcept {
-                return get(key).value_or(std::string(default_val));
-            }
-    };
-
-    class http_response : public response_t {
-        public:
-            // Default constructor
-            http_response() : response_t(beast::http::status::ok, 11) {
-                this->set(beast::http::field::server, "WolfServer/2.0");
-            }
-
-            // Constructor with status code (int or beast::http::status)
-            explicit http_response(int status_code) 
-                : response_t(static_cast<beast::http::status>(status_code), 11) {
-                this->set(beast::http::field::server, "WolfServer/2.0");
-            }
-
-            explicit http_response(beast::http::status status) 
-                : response_t(status, 11) {
-                this->set(beast::http::field::server, "WolfServer/2.0");
-            }
-
-            // Allow base class constructors
-            using response_t::response_t;
-
-            // C++20 concepts for type safety
-            template<StatusType S>
-            http_response& set_status(S status) & {
-                this->result(status);
-                return *this;
-            }
-
-            template<StatusType S>
-            http_response set_status(S status) && {
-                this->result(status);
-                return std::move(*this);
-            }
-
-            // Fluent API: Set JSON body with automatic content-type
-            // Lvalue reference version - returns reference for chaining
-            [[nodiscard]] http_response& json(const boost::json::value& json_value) & {
-                this->set(beast::http::field::content_type, "application/json");
-                this->body() = boost::json::serialize(json_value);
-                this->prepare_payload();
-                return *this;
-            }
-
-            // Rvalue reference version - returns by value to avoid dangling reference
-            [[nodiscard]] http_response json(const boost::json::value& json_value) && {
-                this->set(beast::http::field::content_type, "application/json");
-                this->body() = boost::json::serialize(json_value);
-                this->prepare_payload();
-                return std::move(*this);
-            }
-
-            // Fluent API: Set JSON body from object (convertible to json::value)
-            [[nodiscard]] http_response& json(const boost::json::object& json_obj) & {
-                return json(boost::json::value(json_obj));
-            }
-
-            [[nodiscard]] http_response json(const boost::json::object& json_obj) && {
-                return std::move(*this).json(boost::json::value(json_obj));
-            }
-
-            // Fluent API: Set JSON body from array
-            [[nodiscard]] http_response& json(const boost::json::array& json_arr) & {
-                return json(boost::json::value(json_arr));
-            }
-
-            [[nodiscard]] http_response json(const boost::json::array& json_arr) && {
-                return std::move(*this).json(boost::json::value(json_arr));
-            }
-
-            // Fluent API: Set plain text body
-            [[nodiscard]] http_response& text(std::string_view body_text) & {
-                this->set(beast::http::field::content_type, "text/plain");
-                this->body() = body_text;
-                this->prepare_payload();
-                return *this;
-            }
-
-            [[nodiscard]] http_response text(std::string_view body_text) && {
-                this->set(beast::http::field::content_type, "text/plain");
-                this->body() = body_text;
-                this->prepare_payload();
-                return std::move(*this);
-            }
-
-            // Fluent API: Set HTML body
-            [[nodiscard]] http_response& html(std::string_view html_content) & {
-                this->set(beast::http::field::content_type, "text/html");
-                this->body() = html_content;
-                this->prepare_payload();
-                return *this;
-            }
-
-            [[nodiscard]] http_response html(std::string_view html_content) && {
-                this->set(beast::http::field::content_type, "text/html");
-                this->body() = html_content;
-                this->prepare_payload();
-                return std::move(*this);
-            }
-
-            // Fluent API: Set custom header
-            template<StringLike K, StringLike V>
-            [[nodiscard]] http_response& header(K&& key, V&& value) & {
-                this->set(std::forward<K>(key), std::forward<V>(value));
-                return *this;
-            }
-
-            template<StringLike K, StringLike V>
-            [[nodiscard]] http_response header(K&& key, V&& value) && {
-                this->set(std::forward<K>(key), std::forward<V>(value));
-                return std::move(*this);
-            }
-
-            // Fluent API: Set cookie (convenience wrapper)
-            template<StringLike K, StringLike V>
-            [[nodiscard]] http_response& cookie(
-                K&& key,
-                V&& value,
-                std::string_view path = "/",
-                std::string_view domain = "",
-                int max_age = -1,
-                bool http_only = true,
-                bool secure = false) &
-            {
-                set_cookie(*this, std::forward<K>(key), std::forward<V>(value), 
-                          path, domain, max_age, http_only, secure);
-                return *this;
-            }
-
-            template<StringLike K, StringLike V>
-            [[nodiscard]] http_response cookie(
-                K&& key,
-                V&& value,
-                std::string_view path = "/",
-                std::string_view domain = "",
-                int max_age = -1,
-                bool http_only = true,
-                bool secure = false) &&
-            {
-                set_cookie(*this, std::forward<K>(key), std::forward<V>(value), 
-                          path, domain, max_age, http_only, secure);
-                return std::move(*this);
-            }
-
-            // Fluent API: Send file (set content-disposition)
-            [[nodiscard]] http_response& send_file(std::string_view filename, 
-                                                   std::string_view content_type = "application/octet-stream") & {
-                this->set(beast::http::field::content_type, content_type);
-                this->set(beast::http::field::content_disposition, 
-                         std::format("attachment; filename=\"{}\"", filename));
-                this->prepare_payload();
-                return *this;
-            }
-
-            [[nodiscard]] http_response send_file(std::string_view filename, 
-                                                  std::string_view content_type = "application/octet-stream") && {
-                this->set(beast::http::field::content_type, content_type);
-                this->set(beast::http::field::content_disposition, 
-                         std::format("attachment; filename=\"{}\"", filename));
-                this->prepare_payload();
-                return std::move(*this);
-            }
-
-            // Fluent API: Set status and return reference for chaining
-            [[nodiscard]] http_response& status(int status_code) & {
-                this->result(static_cast<beast::http::status>(status_code));
-                return *this;
-            }
-
-            [[nodiscard]] http_response status(int status_code) && {
-                this->result(static_cast<beast::http::status>(status_code));
-                return std::move(*this);
-            }
-
-            [[nodiscard]] http_response& status(beast::http::status status_val) & {
-                this->result(status_val);
-                return *this;
-            }
-
-            [[nodiscard]] http_response status(beast::http::status status_val) && {
-                this->result(status_val);
-                return std::move(*this);
-            }
-    };
 
     // Unified router that automatically handles both sync and async handlers
     // No need to choose upfront - just use wolf_router!
@@ -590,6 +262,13 @@ namespace wolf {
                     wolf::http_response response;
 
                     if (handler) {
+                        // Get middleware for the route if any
+                        // Using explicit type alias for better IntelliSense support
+                        using middleware_t = http_middleware<http_request, http_response>;
+                        using middleware_list_t = std::vector<middleware_t*>;
+                        
+                        std::optional<middleware_list_t> middleware_list = router_.get_middlewares(std::string(target_clean));
+
                         // Populate request with parameters
                         wolf::http_request req(request_, params, query_params);
                         
@@ -597,9 +276,29 @@ namespace wolf {
                         for (const auto& [key, value] : params) {
                             req.set(key, value);
                         }
+
+                        if(middleware_list) {
+                            // Apply middleware before handler
+                            middleware_list_t& middlewares = *middleware_list;
+                            
+                            std::for_each(middlewares.begin(), middlewares.end(),
+                                [&req](middleware_t* middleware) {
+                                    middleware->before_request(req);
+                                });
+                        }
                         
                         // Router always returns awaitable now - unified handling
                         response = co_await handler(req);
+
+                        if(middleware_list) {
+                            // Apply middleware before handler
+                            middleware_list_t& middlewares = *middleware_list;
+                            
+                            std::for_each(middlewares.begin(), middlewares.end(),
+                                [&req, &response](middleware_t* middleware) {
+                                    middleware->after_response(req, response);
+                                });
+                        }
                     } else {
                         response.result(http::status::not_found);
                         response.body() = "404 Not Found";

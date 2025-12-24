@@ -16,6 +16,12 @@
 #include <string_view>
 #include <format>
 #include <source_location>
+#include "http_middleware.hpp"
+#include "http_response.hpp"
+#include "http_request.hpp"
+
+namespace beast = boost::beast;
+namespace http = beast::http;
 
 namespace wolf {
     // Forward declarations
@@ -51,13 +57,6 @@ namespace wolf {
         }
         return "UNKNOWN";
     }
-
-    using params_t = boost::unordered_map<std::string, std::string>;
-
-    // Forward declare response_t from boost::beast
-    namespace beast = boost::beast;
-    namespace http = beast::http;
-    using response_t = http::response<http::string_body>;
 
     // Type trait to detect awaitable types
     template<typename T>
@@ -191,7 +190,6 @@ namespace wolf {
             }
     };
 
-
     // Unified handler wrapper that can hold both sync and async handlers
     template<typename PT>
     class unified_handler {
@@ -323,6 +321,9 @@ namespace wolf {
                     auto key = std::format("{}:{}", method_to_string(method), route_view);
                     routes_[key] = wrapped_handler;
                 }
+
+                this->last_added_path_ = route_view;
+
                 return *this;
             }
 
@@ -450,6 +451,25 @@ namespace wolf {
                           std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
+            using generic_middleware = http_middleware<http_request, http_response>;
+            using middleware_list_t = std::vector<generic_middleware*>;
+
+            // Attach middleware to a specific route
+            http_router& attach(const generic_middleware& middleware) {
+                if(!this->last_added_path_.empty())
+                    middlewares_[std::string(this->last_added_path_)] = middleware_list_t{const_cast<generic_middleware*>(&middleware)};
+                return *this;
+            }
+
+            // get middleware for a specific route
+            std::optional<middleware_list_t> get_middlewares(std::string_view route) const {
+                auto it = middlewares_.find(std::string(route));
+                if(it != middlewares_.end()) {
+                    return it->second;
+                }
+                return std::nullopt;
+            }
+
             [[nodiscard]] std::pair<std::function<RT(PT)>, params_t> resolve_trie(
                 http_method /*method*/, std::string_view route) const {
                 auto [handler, uri_params] = trie_router_.search(route);
@@ -492,8 +512,10 @@ namespace wolf {
         
         private:
             boost::unordered_map<std::string, std::function<RT(PT)>> routes_;
+            boost::unordered_map<std::string, middleware_list_t> middlewares_;
             trie_router<std::function<RT(PT)>> trie_router_;
             std::function<std::string(const std::string&)> socket_handler_;
+            std::string_view last_added_path_ = "";
     };
 
 } // namespace wolf
