@@ -623,9 +623,9 @@ class unified_handler {
 
 ### Previous Updates (v2.0 - v2.1)
 - ✨ **C++20 Coroutines**: Internal request handling uses `co_await` for non-blocking I/O
-- � **Type Traits**: Added `is_awaitable_v<T>` and `Awaitable` concept
+- 🔬 **Type Traits**: Added `is_awaitable_v<T>` and `Awaitable` concept
 - 📊 **Performance**: Better thread utilization and scalability
-- 🎯 **Reduced Overloads**: From 7 `add()` overloads to 2 unified methods
+- 🎯 **Progressive Simplification**: 7 overloads → 2 overloads → 1 unified function
 - ✅ **Concept-Based**: Uses C++20 concepts for handler detection
 
 ### Breaking Changes
@@ -633,7 +633,37 @@ None! All existing synchronous handlers continue to work. All improvements are b
 
 ## 🎉 Recent Improvements
 
-### v2.2 - Unified Router (Latest) 🎯
+### v2.3 - Code Simplification & IntelliSense Enhancements (December 2024) 🎯
+- ✅ **Merged `add()` Functions**: Consolidated two separate `add()` functions into one using `if constexpr`
+  - Eliminated code duplication between sync and async handler paths
+  - Single function signature with compile-time branching
+  - Cleaner codebase with unified logic flow
+- ✅ **Improved IntelliSense Support**: Enhanced type resolution for better IDE experience
+  - Added explicit type aliases (`middleware_t`, `middleware_list_t`) to reduce abstraction
+  - Replaced `auto` with concrete types where IntelliSense struggled with templates
+  - Better code completion and navigation in VS Code
+- ✅ **Maintained Zero Overhead**: All improvements use compile-time features
+  - `if constexpr` ensures no runtime branching
+  - Type aliases have zero runtime cost
+  - Full backward compatibility preserved
+
+**Code Example - Unified `add()` function:**
+```cpp
+// Single function handles both sync and async with compile-time detection
+template<RouteString T, typename Handler>
+requires std::invocable<Handler, PT>
+http_router& add(http_method method, T&& route, Handler&& handler) {
+    constexpr bool is_async_handler = is_awaitable_v<return_t>;
+    
+    if constexpr (is_async_handler) {
+        // Async handler path
+    } else {
+        // Sync handler path
+    }
+}
+```
+
+### v2.2 - Unified Router 🎯
 - ✅ **Single Router Type**: No more choosing between `wolf_router` and `wolf_async_router`
 - ✅ **Type Erasure**: Safe handler storage using `std::variant`
 - ✅ **Memory Safety**: Fixed segfault from empty `std::function` calls
@@ -642,7 +672,7 @@ None! All existing synchronous handlers continue to work. All improvements are b
 - ✅ **Example Working**: Full demo with sync, async, POST, and parameterized routes
 
 ### v2.1 - Simplified Router API
-- ✅ **71% Code Reduction**: 7 `add()` overloads consolidated to 2
+- ✅ **Code Reduction**: From 7 `add()` overloads to 2, now merged into 1
 - ✅ **Concept-Based Detection**: Compile-time sync/async handler identification
 - ✅ **Zero Overhead**: All branching via `if constexpr` (compile-time)
 

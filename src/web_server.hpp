@@ -4,7 +4,6 @@
 #include <boost/beast.hpp>
 #include <boost/url.hpp>
 #include <boost/json.hpp>
-#include "http_router.hpp"
 #include <concepts>
 #include <ranges>
 #include <string_view>
@@ -18,6 +17,7 @@
 
 #include "http_request.hpp"
 #include "http_response.hpp"
+#include "http_router.hpp"
 
 namespace net = boost::asio;
 namespace http = boost::beast::http;
@@ -262,29 +262,34 @@ namespace wolf {
                     wolf::http_response response;
 
                     if (handler) {
-                        // Get middleware for the route if any
-                        // Using explicit type alias for better IntelliSense support
+                        // Get middleware for the route (exact + wildcard pattern matches)
                         using middleware_t = http_middleware<http_request, http_response>;
-                        using middleware_list_t = std::vector<middleware_t*>;
-                        
-                        std::optional<middleware_list_t> middleware_list = router_.get_middlewares(std::string(target_clean));
+                        std::vector<middleware_t*> middlewares = router_.get_middlewares(std::string(target_clean));
 
                         // Populate request with parameters
                         wolf::http_request req(request_, params, query_params);
+
+                        // Custom request info header for detect unique visitors
+                        req.set_header("Client-Address", socket_.remote_endpoint().address().to_string());
                         
                         // Use C++20 ranges for parameter setting
                         for (const auto& [key, value] : params) {
                             req.set(key, value);
                         }
 
-                        if(middleware_list) {
+                        if(!middlewares.empty()) {
                             // Apply middleware before handler
-                            middleware_list_t& middlewares = *middleware_list;
-                            
-                            std::for_each(middlewares.begin(), middlewares.end(),
-                                [&req](middleware_t* middleware) {
-                                    middleware->before_request(req);
-                                });
+                            for(middleware_t* middleware : middlewares) {
+                                if(!middleware->before_request(req)) {
+                                    // Middleware blocked the request
+                                    response = middleware->blocked_response(req);
+
+                                    auto self = this->shared_from_this();
+                                    co_await beast::http::async_write(socket_, response, net::use_awaitable);
+                                    
+                                    co_return;
+                                }
+                            }
                         }
                         
                         // Router always returns awaitable now - unified handling
@@ -292,10 +297,10 @@ namespace wolf {
 
                         if(middleware_list) {
                             // Apply middleware before handler
-                            middleware_list_t& middlewares = *middleware_list;
+                            const middleware_list_t& middlewares = *middleware_list;
                             
                             std::for_each(middlewares.begin(), middlewares.end(),
-                                [&req, &response](middleware_t* middleware) {
+                                [&req, &response](const auto& middleware) {
                                     middleware->after_response(req, response);
                                 });
                         }

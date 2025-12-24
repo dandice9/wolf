@@ -233,6 +233,18 @@ namespace wolf {
         handler_variant handler_;
     };
 
+    using generic_middleware_t = http_middleware<http_request, http_response>;
+    using middleware_list_t = std::vector<std::unique_ptr<generic_middleware_t>>;
+    
+    // Structure to hold pattern-based middleware
+    struct pattern_middleware {
+        std::string pattern;  // e.g., "/api/auth/*" or "/api/*"
+        std::unique_ptr<generic_middleware_t> middleware;
+        
+        pattern_middleware(std::string p, std::unique_ptr<generic_middleware_t> m)
+            : pattern(std::move(p)), middleware(std::move(m)) {}
+    };
+
     template <typename RT, typename PT>
     class http_router {
         public:
@@ -244,72 +256,112 @@ namespace wolf {
                        route[sp_idx - 1] == '/' && 
                        std::isalnum(static_cast<unsigned char>(route[sp_idx + 1]));
             }
+            
+            // Check if a route matches a wildcard pattern
+            // Patterns: "/api/*" matches "/api/users", "/api/auth/login", etc.
+            [[nodiscard]] static bool matches_pattern(std::string_view pattern, std::string_view route) noexcept {
+                // Check for wildcard at end
+                if (pattern.ends_with("/*")) {
+                    auto prefix = pattern.substr(0, pattern.size() - 1); // Remove "*", keep "/"
+                    return route.starts_with(prefix) || route == pattern.substr(0, pattern.size() - 2);
+                }
+                // Check for wildcard anywhere (e.g., "/api/*/users")
+                if (auto pos = pattern.find('*'); pos != std::string_view::npos) {
+                    auto prefix = pattern.substr(0, pos);
+                    auto suffix = pattern.substr(pos + 1);
+                    
+                    if (!route.starts_with(prefix)) return false;
+                    if (suffix.empty()) return true;
+                    
+                    // Find suffix in remaining route
+                    auto remaining = route.substr(prefix.size());
+                    return remaining.find(suffix) != std::string_view::npos;
+                }
+                // Exact match
+                return pattern == route;
+            }
 
-            // Unified add() for synchronous handlers (handles RT, string, ResponseLike)
+            // Unified add() for both sync and async handlers
             template<RouteString T, typename Handler>
-            requires (!is_awaitable_v<std::invoke_result_t<Handler, PT>>)
+            requires std::invocable<Handler, PT>
             http_router& add(http_method method, T&& route, Handler&& handler) {
                 using return_t = std::invoke_result_t<Handler, PT>;
+                constexpr bool is_async_handler = is_awaitable_v<return_t>;
                 
                 // Convert handler to the expected function signature
                 std::function<RT(PT)> wrapped_handler;
                 
-                if constexpr (std::same_as<return_t, RT>) {
-                    // Direct match - no conversion needed
-                    wrapped_handler = std::forward<Handler>(handler);
-                }
-                else if constexpr (std::same_as<return_t, std::string>) {
-                    // String-returning handler - wrap in response
-                    if constexpr (is_awaitable_v<RT>) {
-                        // Async mode - wrap in coroutine
+                if constexpr (is_async_handler) {
+                    // Async handler path
+                    using inner_t = typename return_t::value_type;
+                    
+                    if constexpr (std::same_as<return_t, RT>) {
+                        wrapped_handler = std::forward<Handler>(handler);
+                    }
+                    else if constexpr (std::same_as<inner_t, std::string>) {
                         wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
                             typename RT::value_type res;
                             res.result(boost::beast::http::status::ok);
                             res.set(boost::beast::http::field::content_type, "text/plain");
-                            res.body() = h(req);
+                            res.body() = co_await h(req);
                             res.prepare_payload();
                             co_return res;
                         };
-                    } else {
-                        // Sync mode
+                    }
+                    else if constexpr (ResponseLike<inner_t>) {
                         wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                            RT res;
-                            res.result(boost::beast::http::status::ok);
-                            res.set(boost::beast::http::field::content_type, "text/plain");
-                            res.body() = h(req);
-                            res.prepare_payload();
-                            return res;
+                            co_return static_cast<typename RT::value_type>(co_await h(req));
                         };
                     }
-                }
-                else if constexpr (ResponseLike<return_t>) {
-                    // ResponseLike type (response_t or http_response)
-                    if constexpr (is_awaitable_v<RT>) {
-                        // Async mode - wrap in coroutine
-                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                            auto response = h(req);
-                            // If RT::value_type is different from return_t, convert
-                            if constexpr (std::same_as<typename RT::value_type, return_t>) {
-                                co_return response;
-                            } else {
-                                // Convert response_t to http_response or vice versa
-                                typename RT::value_type result;
-                                result.result(response.result());
-                                result.body() = std::move(response.body());
-                                // Copy all headers
-                                for (auto const& field : response) {
-                                    result.set(field.name(), field.value());
+                } else {
+                    // Sync handler path
+                    if constexpr (std::same_as<return_t, RT>) {
+                        wrapped_handler = std::forward<Handler>(handler);
+                    }
+                    else if constexpr (std::same_as<return_t, std::string>) {
+                        if constexpr (is_awaitable_v<RT>) {
+                            wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                                typename RT::value_type res;
+                                res.result(boost::beast::http::status::ok);
+                                res.set(boost::beast::http::field::content_type, "text/plain");
+                                res.body() = h(req);
+                                res.prepare_payload();
+                                co_return res;
+                            };
+                        } else {
+                            wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                                RT res;
+                                res.result(boost::beast::http::status::ok);
+                                res.set(boost::beast::http::field::content_type, "text/plain");
+                                res.body() = h(req);
+                                res.prepare_payload();
+                                return res;
+                            };
+                        }
+                    }
+                    else if constexpr (ResponseLike<return_t>) {
+                        if constexpr (is_awaitable_v<RT>) {
+                            wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                                auto response = h(req);
+                                if constexpr (std::same_as<typename RT::value_type, return_t>) {
+                                    co_return response;
+                                } else {
+                                    typename RT::value_type result;
+                                    result.result(response.result());
+                                    result.body() = std::move(response.body());
+                                    for (auto const& field : response) {
+                                        result.set(field.name(), field.value());
+                                    }
+                                    result.version(response.version());
+                                    result.prepare_payload();
+                                    co_return result;
                                 }
-                                result.version(response.version());
-                                result.prepare_payload();
-                                co_return result;
-                            }
-                        };
-                    } else {
-                        // Sync mode - cast if needed
-                        wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                            return static_cast<RT>(h(req));
-                        };
+                            };
+                        } else {
+                            wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
+                                return static_cast<RT>(h(req));
+                            };
+                        }
                     }
                 }
                 
@@ -324,49 +376,6 @@ namespace wolf {
 
                 this->last_added_path_ = route_view;
 
-                return *this;
-            }
-
-            // Unified add() for asynchronous handlers (handles awaitable<RT>, awaitable<string>, awaitable<ResponseLike>)
-            template<RouteString T, typename Handler>
-            requires is_awaitable_v<std::invoke_result_t<Handler, PT>>
-            http_router& add(http_method method, T&& route, Handler&& handler) {
-                using return_t = std::invoke_result_t<Handler, PT>;
-                using inner_t = typename return_t::value_type; // Extract T from awaitable<T>
-                
-                // Convert handler to the expected function signature
-                std::function<RT(PT)> wrapped_handler;
-                
-                if constexpr (std::same_as<return_t, RT>) {
-                    // Direct match - no conversion needed
-                    wrapped_handler = std::forward<Handler>(handler);
-                }
-                else if constexpr (std::same_as<inner_t, std::string>) {
-                    // Awaitable<string> - wrap in response
-                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                        RT res;
-                        res.result(boost::beast::http::status::ok);
-                        res.set(boost::beast::http::field::content_type, "text/plain");
-                        res.body() = co_await h(req);
-                        res.prepare_payload();
-                        co_return res;
-                    };
-                }
-                else if constexpr (ResponseLike<inner_t>) {
-                    // Awaitable<ResponseLike> - cast to RT
-                    wrapped_handler = [h = std::forward<Handler>(handler)](PT req) -> RT {
-                        co_return static_cast<typename RT::value_type>(co_await h(req));
-                    };
-                }
-                
-                // Insert into router
-                std::string_view route_view = route;
-                if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), wrapped_handler);
-                } else {
-                    auto key = std::format("{}:{}", method_to_string(method), route_view);
-                    routes_[key] = wrapped_handler;
-                }
                 return *this;
             }
 
@@ -451,23 +460,55 @@ namespace wolf {
                           std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            using generic_middleware = http_middleware<http_request, http_response>;
-            using middleware_list_t = std::vector<generic_middleware*>;
-
-            // Attach middleware to a specific route
-            http_router& attach(const generic_middleware& middleware) {
+            // Attach middleware to a specific route (last added route)
+            http_router& attach(std::unique_ptr<generic_middleware_t> middleware) {
                 if(!this->last_added_path_.empty())
-                    middlewares_[std::string(this->last_added_path_)] = middleware_list_t{const_cast<generic_middleware*>(&middleware)};
+                {
+                    if(middlewares_.find(std::string(this->last_added_path_)) == middlewares_.end())
+                        middlewares_[std::string(this->last_added_path_)] = middleware_list_t{};
+
+                    middlewares_[std::string(this->last_added_path_)].emplace_back(std::move(middleware));
+                }
                 return *this;
             }
+            
+            // Attach middleware using a wildcard pattern
+            // Examples: "/api/*", "/api/auth/*", "/*" (all routes)
+            template<RouteString T>
+            http_router& use(T&& pattern, std::unique_ptr<generic_middleware_t> middleware) {
+                pattern_middlewares_.emplace_back(
+                    std::string(std::forward<T>(pattern)), 
+                    std::move(middleware)
+                );
+                return *this;
+            }
+            
+            // Attach middleware to all routes (shorthand for "/*")
+            http_router& use(std::unique_ptr<generic_middleware_t> middleware) {
+                return use("/*", std::move(middleware));
+            }
 
-            // get middleware for a specific route
-            std::optional<middleware_list_t> get_middlewares(std::string_view route) const {
-                auto it = middlewares_.find(std::string(route));
-                if(it != middlewares_.end()) {
-                    return it->second;
+            // Get all middlewares for a specific route (exact + pattern matches)
+            // Returns pointers to middlewares (non-owning), caller should not delete
+            [[nodiscard]] std::vector<generic_middleware_t*> get_middlewares(std::string_view route) const {
+                std::vector<generic_middleware_t*> result;
+                
+                // First, collect pattern-based middlewares (in order they were registered)
+                for (const auto& pm : pattern_middlewares_) {
+                    if (matches_pattern(pm.pattern, route)) {
+                        result.push_back(pm.middleware.get());
+                    }
                 }
-                return std::nullopt;
+                
+                // Then, collect route-specific middlewares
+                auto it = middlewares_.find(std::string(route));
+                if (it != middlewares_.end()) {
+                    for (const auto& m : it->second) {
+                        result.push_back(m.get());
+                    }
+                }
+                
+                return result;
             }
 
             [[nodiscard]] std::pair<std::function<RT(PT)>, params_t> resolve_trie(
@@ -513,6 +554,7 @@ namespace wolf {
         private:
             boost::unordered_map<std::string, std::function<RT(PT)>> routes_;
             boost::unordered_map<std::string, middleware_list_t> middlewares_;
+            std::vector<pattern_middleware> pattern_middlewares_;  // Wildcard pattern middlewares
             trie_router<std::function<RT(PT)>> trie_router_;
             std::function<std::string(const std::string&)> socket_handler_;
             std::string_view last_added_path_ = "";
