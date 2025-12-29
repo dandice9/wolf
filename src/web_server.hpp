@@ -44,14 +44,11 @@ namespace wolf {
 
         if(iequals(ext, ".htm"))  return "text/html";
         if(iequals(ext, ".html")) return "text/html";
-        if(iequals(ext, ".php"))  return "text/html";
         if(iequals(ext, ".css"))  return "text/css";
         if(iequals(ext, ".txt"))  return "text/plain";
         if(iequals(ext, ".js"))   return "application/javascript";
         if(iequals(ext, ".json")) return "application/json";
         if(iequals(ext, ".xml"))  return "application/xml";
-        if(iequals(ext, ".swf"))  return "application/x-shockwave-flash";
-        if(iequals(ext, ".flv"))  return "video/x-flv";
         if(iequals(ext, ".png"))  return "image/png";
         if(iequals(ext, ".jpe"))  return "image/jpeg";
         if(iequals(ext, ".jpeg")) return "image/jpeg";
@@ -65,6 +62,36 @@ namespace wolf {
         if(iequals(ext, ".svgz")) return "image/svg+xml";
 
         return "application/text";
+    }
+    
+    constexpr bool is_acceptable_file(beast::string_view path){
+        using beast::iequals;
+        auto const ext = [&path]
+        {
+            auto const pos = path.rfind(".");
+            if(pos == beast::string_view::npos)
+                return beast::string_view{};
+            return path.substr(pos);
+        }();
+
+       return (iequals(ext, ".txt") || 
+            iequals(ext, ".js") || 
+            iequals(ext, ".json") ||
+            iequals(ext, ".css") ||
+            iequals(ext, ".html") ||
+            iequals(ext, ".htm") ||
+            iequals(ext, ".png") ||
+            iequals(ext, ".jpe") ||
+            iequals(ext, ".jpeg") ||
+            iequals(ext, ".jpg") ||
+            iequals(ext, ".gif") ||
+            iequals(ext, ".bmp") ||
+            iequals(ext, ".ico") ||
+            iequals(ext, ".tiff") ||
+            iequals(ext, ".tif") ||
+            iequals(ext, ".svg") ||
+            iequals(ext, ".svgz")
+        );
     }
 
     // C++20 [[nodiscard]] and constexpr where possible
@@ -345,7 +372,7 @@ namespace wolf {
                         beast::http::file_body::value_type file_body;
 
                         std::string file_target = std::string(target_clean.substr(1)); // remove leading '/'
-                        bool is_valid_file_path = !file_target.empty() && (file_target.find("..") == beast::string_view::npos);
+                        bool is_valid_file_path = !file_target.empty() && (file_target.find("..") == beast::string_view::npos) && is_acceptable_file(file_target);
 
                         if(is_valid_file_path) {
                             auto file_path = std::string("static/") + std::string(file_target);
@@ -371,7 +398,7 @@ namespace wolf {
                     }
                     
                     response.version(request_.version() > 0 ? request_.version() : 11);
-                    response.set(http::field::server, "WolfServer/2.0");
+                    response.set(http::field::server, "Wolf/2.0");
                     response.prepare_payload();
 
                     auto self = this->shared_from_this();
