@@ -31,6 +31,42 @@ namespace wolf {
     using callback_t = std::function<wolf::http_response(const wolf::http_request&)>;
     using async_callback_t = std::function<net::awaitable<wolf::http_response>(const wolf::http_request&)>;
 
+    beast::string_view mime_type(beast::string_view path)
+    {
+        using beast::iequals;
+        auto const ext = [&path]
+        {
+            auto const pos = path.rfind(".");
+            if(pos == beast::string_view::npos)
+                return beast::string_view{};
+            return path.substr(pos);
+        }();
+
+        if(iequals(ext, ".htm"))  return "text/html";
+        if(iequals(ext, ".html")) return "text/html";
+        if(iequals(ext, ".php"))  return "text/html";
+        if(iequals(ext, ".css"))  return "text/css";
+        if(iequals(ext, ".txt"))  return "text/plain";
+        if(iequals(ext, ".js"))   return "application/javascript";
+        if(iequals(ext, ".json")) return "application/json";
+        if(iequals(ext, ".xml"))  return "application/xml";
+        if(iequals(ext, ".swf"))  return "application/x-shockwave-flash";
+        if(iequals(ext, ".flv"))  return "video/x-flv";
+        if(iequals(ext, ".png"))  return "image/png";
+        if(iequals(ext, ".jpe"))  return "image/jpeg";
+        if(iequals(ext, ".jpeg")) return "image/jpeg";
+        if(iequals(ext, ".jpg"))  return "image/jpeg";
+        if(iequals(ext, ".gif"))  return "image/gif";
+        if(iequals(ext, ".bmp"))  return "image/bmp";
+        if(iequals(ext, ".ico"))  return "image/vnd.microsoft.icon";
+        if(iequals(ext, ".tiff")) return "image/tiff";
+        if(iequals(ext, ".tif"))  return "image/tiff";
+        if(iequals(ext, ".svg"))  return "image/svg+xml";
+        if(iequals(ext, ".svgz")) return "image/svg+xml";
+
+        return "application/text";
+    }
+
     // C++20 [[nodiscard]] and constexpr where possible
     [[nodiscard]] inline response_t make_response(
         std::string_view body,
@@ -270,7 +306,7 @@ namespace wolf {
                         wolf::http_request req(request_, params, query_params);
 
                         // Custom request info header for detect unique visitors
-                        req.set_header("Client-Address", socket_.remote_endpoint().address().to_string());
+                        req.set("Client-Address", socket_.remote_endpoint().address().to_string());
                         
                         // Use C++20 ranges for parameter setting
                         for (const auto& [key, value] : params) {
@@ -295,16 +331,41 @@ namespace wolf {
                         // Router always returns awaitable now - unified handling
                         response = co_await handler(req);
 
-                        if(middleware_list) {
-                            // Apply middleware before handler
-                            const middleware_list_t& middlewares = *middleware_list;
-                            
+                        if(!middlewares.empty()) {
+                            // Apply middleware before sending response                            
                             std::for_each(middlewares.begin(), middlewares.end(),
                                 [&req, &response](const auto& middleware) {
                                     middleware->after_response(req, response);
                                 });
                         }
-                    } else {
+                    } 
+                    else {
+                        // check if file exists for static serving
+                        beast::error_code file_ec;
+                        beast::http::file_body::value_type file_body;
+
+                        std::string file_target = std::string(target_clean.substr(1)); // remove leading '/'
+                        bool is_valid_file_path = !file_target.empty() && (file_target.find("..") == beast::string_view::npos);
+
+                        if(is_valid_file_path) {
+                            auto file_path = std::string("static/") + std::string(file_target);
+                            file_body.open(file_path.c_str(), beast::file_mode::scan, file_ec);
+
+                            if(!file_ec) {
+                                http::response<http::file_body> static_response{
+                                        std::piecewise_construct,
+                                        std::make_tuple(std::move(file_body)),
+                                        std::make_tuple(http::status::ok, request_.version())};
+                                
+                                static_response.prepare_payload();
+                                
+                                auto self = this->shared_from_this();
+                                co_await beast::http::async_write(socket_, static_response, net::use_awaitable);
+
+                                co_return;
+                            }
+                        }
+
                         response.result(http::status::not_found);
                         response.body() = "404 Not Found";
                     }
