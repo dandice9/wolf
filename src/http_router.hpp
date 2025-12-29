@@ -19,6 +19,7 @@
 #include "http_middleware.hpp"
 #include "http_response.hpp"
 #include "http_request.hpp"
+#include <iostream>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -90,10 +91,18 @@ namespace wolf {
         private:
             struct trie_node {
                 boost::unordered_map<std::string, std::unique_ptr<trie_node>> children;
-                Res handler = Res{};
-                bool is_end = false;
+                // Store handlers per HTTP method to distinguish between GET/POST/etc on same route
+                boost::unordered_map<http_method, Res> handlers;
                 bool is_param = false;
                 std::string param_name;
+                
+                [[nodiscard]] bool has_handler(http_method method) const noexcept {
+                    return handlers.find(method) != handlers.end();
+                }
+                
+                [[nodiscard]] bool has_any_handler() const noexcept {
+                    return !handlers.empty();
+                }
             };
 
             std::unique_ptr<trie_node> root;
@@ -121,7 +130,7 @@ namespace wolf {
 
             // Use std::string_view for efficiency (C++20)
             template<RouteString T>
-            void insert(T&& route, const Res& handler) {
+            void insert(http_method method, T&& route, const Res& handler) {
                 auto segments = split_route(std::forward<T>(route));
                 trie_node* current = root.get();
 
@@ -139,42 +148,41 @@ namespace wolf {
                         current = current->children[key].get();
                     } else {
                         // Regular segment (convert string_view to string for map key)
-                        std::string segment_str(segment);
-                        if (current->children.find(segment_str) == current->children.end()) {
-                            current->children[segment_str] = std::make_unique<trie_node>();
+                        if (current->children.find(segment) == current->children.end()) {
+                            current->children[segment] = std::make_unique<trie_node>();
                         }
-                        current = current->children[segment_str].get();
+                        current = current->children[segment].get();
                     }
                 }
 
-                current->is_end = true;
-                current->handler = handler;
+                // Store handler for the specific HTTP method
+                current->handlers[method] = handler;
             }
 
             // Use std::optional for cleaner return (C++20)
-            [[nodiscard]] std::pair<Res, params_t> search(std::string_view route) const {
+            [[nodiscard]] std::pair<Res, params_t> search(http_method method, std::string_view route) const {
                 auto segments = split_route(route);
                 const trie_node* current = root.get();
                 params_t params;
 
                 for (const auto& segment : segments) {
                     bool found = false;
-
-                    // Convert segment to string for map lookup
-                    std::string segment_str(segment);
                     
                     // First try exact match
-                    auto it = current->children.find(segment_str);
+                    auto it = current->children.find(segment);
                     if (it != current->children.end()) {
                         current = it->second.get();
                         found = true;
                     } 
                     // Then try parameter match
-                    else if (auto param_it = current->children.find(":param"); 
-                             param_it != current->children.end()) {
-                        current = param_it->second.get();
-                        params[current->param_name] = std::string(segment);
-                        found = true;
+                    else {
+                        auto param_it = current->children.find(":param");
+
+                        if (param_it != current->children.end()) {
+                            current = param_it->second.get();
+                            params[current->param_name] = segment;
+                            found = true;
+                        }
                     }
 
                     if (!found) {
@@ -182,8 +190,10 @@ namespace wolf {
                     }
                 }
 
-                if (current->is_end) {
-                    return {current->handler, params};
+                // Look up handler for the specific HTTP method
+                auto handler_it = current->handlers.find(method);
+                if (handler_it != current->handlers.end()) {
+                    return {handler_it->second, params};
                 }
 
                 return {nullptr, {}};
@@ -368,7 +378,7 @@ namespace wolf {
                 // Insert into router
                 std::string_view route_view = route;
                 if (is_trie_route(route_view)) {
-                    trie_router_.insert(std::forward<T>(route), wrapped_handler);
+                    trie_router_.insert(method, std::forward<T>(route), wrapped_handler);
                 } else {
                     auto key = std::format("{}:{}", method_to_string(method), route_view);
                     routes_[key] = wrapped_handler;
@@ -512,8 +522,8 @@ namespace wolf {
             }
 
             [[nodiscard]] std::pair<std::function<RT(PT)>, params_t> resolve_trie(
-                http_method /*method*/, std::string_view route) const {
-                auto [handler, uri_params] = trie_router_.search(route);
+                http_method method, std::string_view route) const {
+                auto [handler, uri_params] = trie_router_.search(method, route);
 
                 if (handler) {
                     return {handler, uri_params};

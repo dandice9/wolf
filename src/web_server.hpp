@@ -31,67 +31,100 @@ namespace wolf {
     using callback_t = std::function<wolf::http_response(const wolf::http_request&)>;
     using async_callback_t = std::function<net::awaitable<wolf::http_response>(const wolf::http_request&)>;
 
-    beast::string_view mime_type(beast::string_view path)
-    {
-        using beast::iequals;
-        auto const ext = [&path]
-        {
-            auto const pos = path.rfind(".");
-            if(pos == beast::string_view::npos)
-                return beast::string_view{};
-            return path.substr(pos);
-        }();
+    // Unified extension-to-MIME mapping structure
+    struct mime_mapping {
+        std::string_view extension;
+        std::string_view mime_type;
+    };
 
-        if(iequals(ext, ".htm"))  return "text/html";
-        if(iequals(ext, ".html")) return "text/html";
-        if(iequals(ext, ".css"))  return "text/css";
-        if(iequals(ext, ".txt"))  return "text/plain";
-        if(iequals(ext, ".js"))   return "application/javascript";
-        if(iequals(ext, ".json")) return "application/json";
-        if(iequals(ext, ".xml"))  return "application/xml";
-        if(iequals(ext, ".png"))  return "image/png";
-        if(iequals(ext, ".jpe"))  return "image/jpeg";
-        if(iequals(ext, ".jpeg")) return "image/jpeg";
-        if(iequals(ext, ".jpg"))  return "image/jpeg";
-        if(iequals(ext, ".gif"))  return "image/gif";
-        if(iequals(ext, ".bmp"))  return "image/bmp";
-        if(iequals(ext, ".ico"))  return "image/vnd.microsoft.icon";
-        if(iequals(ext, ".tiff")) return "image/tiff";
-        if(iequals(ext, ".tif"))  return "image/tiff";
-        if(iequals(ext, ".svg"))  return "image/svg+xml";
-        if(iequals(ext, ".svgz")) return "image/svg+xml";
+    // Comprehensive list of supported static file extensions and their MIME types
+    inline constexpr std::array<mime_mapping, 42> mime_mappings = {{
+        // Text/Document
+        {".htm",   "text/html"},
+        {".html",  "text/html"},
+        {".css",   "text/css"},
+        {".txt",   "text/plain"},
+        {".xml",   "application/xml"},
+        {".csv",   "text/csv"},
+        {".md",    "text/markdown"},
+        
+        // JavaScript/JSON
+        {".js",    "application/javascript"},
+        {".mjs",   "application/javascript"},
+        {".json",  "application/json"},
+        {".map",   "application/json"},
+        
+        // Images
+        {".png",   "image/png"},
+        {".jpe",   "image/jpeg"},
+        {".jpeg",  "image/jpeg"},
+        {".jpg",   "image/jpeg"},
+        {".gif",   "image/gif"},
+        {".bmp",   "image/bmp"},
+        {".ico",   "image/vnd.microsoft.icon"},
+        {".tiff",  "image/tiff"},
+        {".tif",   "image/tiff"},
+        {".svg",   "image/svg+xml"},
+        {".svgz",  "image/svg+xml"},
+        {".webp",  "image/webp"},
+        {".avif",  "image/avif"},
+        
+        // Fonts
+        {".woff",  "font/woff"},
+        {".woff2", "font/woff2"},
+        {".ttf",   "font/ttf"},
+        {".otf",   "font/otf"},
+        {".eot",   "application/vnd.ms-fontobject"},
+        
+        // Audio
+        {".mp3",   "audio/mpeg"},
+        {".wav",   "audio/wav"},
+        {".ogg",   "audio/ogg"},
+        
+        // Video
+        {".mp4",   "video/mp4"},
+        {".webm",  "video/webm"},
+        {".ogv",   "video/ogg"},
+        
+        // Application/Binary
+        {".pdf",   "application/pdf"},
+        {".zip",   "application/zip"},
+        {".wasm",  "application/wasm"},
+        {".gz",    "application/gzip"},
+        {".tar",   "application/x-tar"},
+    }};
 
-        return "application/text";
+    // Helper to extract file extension from path
+    inline beast::string_view get_extension(beast::string_view path) {
+        auto const pos = path.rfind(".");
+        if (pos == beast::string_view::npos)
+            return beast::string_view{};
+        return path.substr(pos);
+    }
+
+    // Find MIME mapping for a given extension (case-insensitive)
+    inline const mime_mapping* find_mime_mapping(beast::string_view ext) {
+        for (const auto& mapping : mime_mappings) {
+            if (beast::iequals(ext, mapping.extension)) {
+                return &mapping;
+            }
+        }
+        return nullptr;
+    }
+
+    // Get MIME type for a file path
+    [[nodiscard]] inline beast::string_view mime_type(beast::string_view path) {
+        const auto ext = get_extension(path);
+        if (const auto* mapping = find_mime_mapping(ext)) {
+            return beast::string_view(mapping->mime_type.data(), mapping->mime_type.size());
+        }
+        return "application/octet-stream";
     }
     
-    constexpr bool is_acceptable_file(beast::string_view path){
-        using beast::iequals;
-        auto const ext = [&path]
-        {
-            auto const pos = path.rfind(".");
-            if(pos == beast::string_view::npos)
-                return beast::string_view{};
-            return path.substr(pos);
-        }();
-
-       return (iequals(ext, ".txt") || 
-            iequals(ext, ".js") || 
-            iequals(ext, ".json") ||
-            iequals(ext, ".css") ||
-            iequals(ext, ".html") ||
-            iequals(ext, ".htm") ||
-            iequals(ext, ".png") ||
-            iequals(ext, ".jpe") ||
-            iequals(ext, ".jpeg") ||
-            iequals(ext, ".jpg") ||
-            iequals(ext, ".gif") ||
-            iequals(ext, ".bmp") ||
-            iequals(ext, ".ico") ||
-            iequals(ext, ".tiff") ||
-            iequals(ext, ".tif") ||
-            iequals(ext, ".svg") ||
-            iequals(ext, ".svgz")
-        );
+    // Check if file extension is acceptable for static serving
+    [[nodiscard]] inline bool is_acceptable_file(beast::string_view path) {
+        const auto ext = get_extension(path);
+        return find_mime_mapping(ext) != nullptr;
     }
 
     // C++20 [[nodiscard]] and constexpr where possible
@@ -334,11 +367,6 @@ namespace wolf {
 
                         // Custom request info header for detect unique visitors
                         req.set("Client-Address", socket_.remote_endpoint().address().to_string());
-                        
-                        // Use C++20 ranges for parameter setting
-                        for (const auto& [key, value] : params) {
-                            req.set(key, value);
-                        }
 
                         if(!middlewares.empty()) {
                             // Apply middleware before handler
@@ -384,6 +412,8 @@ namespace wolf {
                                         std::make_tuple(std::move(file_body)),
                                         std::make_tuple(http::status::ok, request_.version())};
                                 
+                                // Set Content-Type header based on file extension
+                                static_response.set(http::field::content_type, mime_type(file_target));
                                 static_response.prepare_payload();
                                 
                                 auto self = this->shared_from_this();
