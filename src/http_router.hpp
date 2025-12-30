@@ -59,6 +59,53 @@ namespace wolf {
         return "UNKNOWN";
     }
 
+    [[nodiscard]] constexpr http_method string_to_method(std::string_view method) noexcept {
+        if (method == "GET") return http_method::GET;
+        if (method == "POST") return http_method::POST;
+        if (method == "PUT") return http_method::PUT;
+        if (method == "DELETE") return http_method::DEL;
+        if (method == "PATCH") return http_method::PATCH;
+        if (method == "OPTIONS") return http_method::OPTIONS;
+        if (method == "HEAD") return http_method::HEAD;
+        if (method == "CONNECT") return http_method::CONNECT;
+        if (method == "TRACE") return http_method::TRACE;
+        return http_method::GET; // Default to GET for unknown methods
+    }
+
+    [[nodiscard]] constexpr http::verb method_to_verb(http_method method) noexcept {
+        switch (method) {
+            case http_method::GET: return http::verb::get;
+            case http_method::POST: return http::verb::post;
+            case http_method::PUT: return http::verb::put;
+            case http_method::DEL: return http::verb::delete_;
+            case http_method::PATCH: return http::verb::patch;
+            case http_method::OPTIONS: return http::verb::options;
+            case http_method::HEAD: return http::verb::head;
+            case http_method::CONNECT: return http::verb::connect;
+            case http_method::TRACE: return http::verb::trace;
+        }
+        return http::verb::get; // Default to GET for unknown methods
+    }
+
+    [[nodiscard]] constexpr http_method verb_to_method(http::verb verb) noexcept {
+        switch (verb) {
+            case http::verb::get: return http_method::GET;
+            case http::verb::post: return http_method::POST;
+            case http::verb::put: return http_method::PUT;
+            case http::verb::delete_: return http_method::DEL;
+            case http::verb::patch: return http_method::PATCH;
+            case http::verb::options: return http_method::OPTIONS;
+            case http::verb::head: return http_method::HEAD;
+            case http::verb::connect: return http_method::CONNECT;
+            case http::verb::trace: return http_method::TRACE;
+            default: return http_method::GET; // Default to GET for unknown verbs
+        }
+    }
+
+    [[nodiscard]] constexpr std::string verb_to_string(http::verb verb) noexcept {
+        return std::string(method_to_string(verb_to_method(verb)));
+    }
+
     // Type trait to detect awaitable types
     template<typename T>
     struct is_awaitable : std::false_type {};
@@ -385,6 +432,7 @@ namespace wolf {
                 }
 
                 this->last_added_path_ = route_view;
+                this->last_added_method_ = method;
 
                 return *this;
             }
@@ -470,14 +518,19 @@ namespace wolf {
                           std::function<result_t(PT)>(std::forward<Callable>(handler)));
             }
 
-            // Attach middleware to a specific route (last added route)
+            // Attach middleware to a specific route (last added route with its method)
             http_router& attach(std::unique_ptr<generic_middleware_t> middleware) {
-                if(!this->last_added_path_.empty())
+                if(!this->last_added_path_.empty() && this->last_added_method_.has_value())
                 {
-                    if(middlewares_.find(std::string(this->last_added_path_)) == middlewares_.end())
-                        middlewares_[std::string(this->last_added_path_)] = middleware_list_t{};
+                    // Use "METHOD:path" as key to distinguish between methods
+                    auto key = std::format("{}:{}", 
+                        method_to_string(this->last_added_method_.value()), 
+                        this->last_added_path_);
+                    
+                    if(middlewares_.find(key) == middlewares_.end())
+                        middlewares_[key] = middleware_list_t{};
 
-                    middlewares_[std::string(this->last_added_path_)].emplace_back(std::move(middleware));
+                    middlewares_[key].emplace_back(std::move(middleware));
                 }
                 return *this;
             }
@@ -500,7 +553,7 @@ namespace wolf {
 
             // Get all middlewares for a specific route (exact + pattern matches)
             // Returns pointers to middlewares (non-owning), caller should not delete
-            [[nodiscard]] std::vector<generic_middleware_t*> get_middlewares(std::string_view route) const {
+            [[nodiscard]] std::vector<generic_middleware_t*> get_middlewares(http_method method, std::string_view route) const {
                 std::vector<generic_middleware_t*> result;
                 
                 // First, collect pattern-based middlewares (in order they were registered)
@@ -510,8 +563,9 @@ namespace wolf {
                     }
                 }
                 
-                // Then, collect route-specific middlewares
-                auto it = middlewares_.find(std::string(route));
+                // Then, collect route-specific middlewares using "METHOD:path" key
+                auto key = std::format("{}:{}", method_to_string(method), route);
+                auto it = middlewares_.find(key);
                 if (it != middlewares_.end()) {
                     for (const auto& m : it->second) {
                         result.push_back(m.get());
@@ -563,11 +617,12 @@ namespace wolf {
         
         private:
             boost::unordered_map<std::string, std::function<RT(PT)>> routes_;
-            boost::unordered_map<std::string, middleware_list_t> middlewares_;
+            boost::unordered_map<std::string, middleware_list_t> middlewares_;  // key: "METHOD:path"
             std::vector<pattern_middleware> pattern_middlewares_;  // Wildcard pattern middlewares
             trie_router<std::function<RT(PT)>> trie_router_;
             std::function<std::string(const std::string&)> socket_handler_;
             std::string_view last_added_path_ = "";
+            std::optional<http_method> last_added_method_ = std::nullopt;
     };
 
 } // namespace wolf

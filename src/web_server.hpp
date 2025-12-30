@@ -269,15 +269,14 @@ namespace wolf {
             }
     };
 
-    template<typename Router>
-    class http_session : public std::enable_shared_from_this<http_session<Router>> {
+    class http_session : public std::enable_shared_from_this<http_session> {
         tcp::socket socket_;
         beast::flat_buffer buffer_;
-        Router& router_;
+        wolf_router& router_;
         wolf::response_t response_;
 
         public:
-            http_session(tcp::socket socket, Router& router)
+            http_session(tcp::socket socket, wolf_router& router)
                 : socket_(std::move(socket)), router_(router) {}
 
             void start() {
@@ -334,20 +333,7 @@ namespace wolf {
                     auto target_clean = (pos != std::string_view::npos) ? target.substr(0, pos) : target;
                     
                     // Convert Beast HTTP method to wolf http_method using constexpr map
-                    wolf::http_method method = [&]() constexpr -> wolf::http_method {
-                        switch(request_.method()) {
-                            case http::verb::get: return wolf::http_method::GET;
-                            case http::verb::post: return wolf::http_method::POST;
-                            case http::verb::put: return wolf::http_method::PUT;
-                            case http::verb::delete_: return wolf::http_method::DEL;
-                            case http::verb::patch: return wolf::http_method::PATCH;
-                            case http::verb::options: return wolf::http_method::OPTIONS;
-                            case http::verb::head: return wolf::http_method::HEAD;
-                            case http::verb::connect: return wolf::http_method::CONNECT;
-                            case http::verb::trace: return wolf::http_method::TRACE;
-                            default: return wolf::http_method::GET;
-                        }
-                    }();
+                    wolf::http_method method = verb_to_method(request_.method());
 
                     auto query_params = url::parse_query(std::string(target));
 
@@ -359,8 +345,7 @@ namespace wolf {
 
                     if (handler) {
                         // Get middleware for the route (exact + wildcard pattern matches)
-                        using middleware_t = http_middleware<http_request, http_response>;
-                        std::vector<middleware_t*> middlewares = router_.get_middlewares(std::string(target_clean));
+                        auto middlewares = router_.get_middlewares(method, target_clean);
 
                         // Populate request with parameters
                         wolf::http_request req(request_, params, query_params);
@@ -370,8 +355,9 @@ namespace wolf {
 
                         if(!middlewares.empty()) {
                             // Apply middleware before handler
-                            for(middleware_t* middleware : middlewares) {
-                                if(!middleware->before_request(req)) {
+                            for(auto* middleware : middlewares) {
+                                auto before_result = co_await middleware->before_request(req);
+                                if(!before_result) {
                                     // Middleware blocked the request
                                     response = middleware->blocked_response(req);
 
@@ -388,10 +374,9 @@ namespace wolf {
 
                         if(!middlewares.empty()) {
                             // Apply middleware before sending response                            
-                            std::for_each(middlewares.begin(), middlewares.end(),
-                                [&req, &response](const auto& middleware) {
-                                    middleware->after_response(req, response);
-                                });
+                            for(auto* middleware : middlewares) {
+                                co_await middleware->after_response(req, response);
+                            }
                         }
                     } 
                     else {
@@ -454,7 +439,7 @@ namespace wolf {
             acceptor_->async_accept(
                 [this](beast::error_code ec, tcp::socket socket) {
                     if (!ec) {
-                        std::make_shared<http_session<wolf_router>>(std::move(socket), router_)->start();
+                        std::make_shared<http_session>(std::move(socket), router_)->start();
                     }
                     
                     // Accept next connection
